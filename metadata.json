@@ -1,0 +1,6 @@
+{
+  "name": "WP Launcher",
+  "description": "A high-fidelity Windows Phone launcher experience with live tiles, dynamic notifications, and a Cortana-inspired Gemini AI voice assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
