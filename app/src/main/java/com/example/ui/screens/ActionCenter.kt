@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.parseAccent
 import com.example.viewmodel.ActiveScreen
 import com.example.viewmodel.LauncherViewModel
 
@@ -42,7 +43,7 @@ fun ActionCenter(
     var isAirplaneMode by remember { mutableStateOf(false) }
     var isLocationOn by remember { mutableStateOf(true) }
 
-    val accentColor = Color(android.graphics.Color.parseColor(settings.accentColorHex))
+    val accentColor = parseAccent(settings.accentColorHex)
     val isDark = settings.isDarkTheme
 
     // Sliding Top Sheet
@@ -62,21 +63,18 @@ fun ActionCenter(
                 .pointerInput(Unit) {
                     var accumulatedDrag = 0f
                     detectVerticalDragGestures(
-                        onDragEnd = {
-                            if (accumulatedDrag < -15f) {
-                                onClose()
-                            }
-                            accumulatedDrag = 0f
-                        },
-                        onDragCancel = {
-                            accumulatedDrag = 0f
-                        },
+                        onDragStart = { accumulatedDrag = 0f },
                         onVerticalDrag = { change, dragAmount ->
                             accumulatedDrag += dragAmount
-                            if (accumulatedDrag < -60f) {
-                                onClose()
-                            }
-                        }
+                            change.consume()
+                        },
+                        // Decide dismissal only on release (was firing repeatedly mid-drag,
+                        // snapping the sheet shut while the finger was still down).
+                        onDragEnd = {
+                            if (accumulatedDrag < -60f) onClose()
+                            accumulatedDrag = 0f
+                        },
+                        onDragCancel = { accumulatedDrag = 0f }
                     )
                 }
         ) {

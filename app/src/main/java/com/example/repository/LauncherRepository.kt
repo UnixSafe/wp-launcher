@@ -27,6 +27,9 @@ class LauncherRepository(
     val allTiles: Flow<List<TileEntity>> = launcherDao.getAllTiles()
     val settings: Flow<SettingsEntity?> = launcherDao.getSettings()
 
+    suspend fun getAllTilesBlock(): List<TileEntity> =
+        withContext(Dispatchers.IO) { launcherDao.getAllTilesBlock() }
+
     suspend fun insertTile(tile: TileEntity) = launcherDao.insertTile(tile)
     suspend fun insertTiles(tiles: List<TileEntity>) = launcherDao.insertTiles(tiles)
     suspend fun updateTile(tile: TileEntity) = launcherDao.updateTile(tile)

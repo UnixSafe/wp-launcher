@@ -1,9 +1,9 @@
 package com.example.viewmodel
 
 import android.app.Application
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.Uri
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
@@ -75,9 +75,18 @@ class LauncherViewModel(
     private val _isCortanaThinking = MutableStateFlow(false)
     val isCortanaThinking: StateFlow<Boolean> = _isCortanaThinking.asStateFlow()
 
-    // Live flip state: rotating index that changes periodically to animate tiles
-    private val _liveFlipState = MutableStateFlow(0)
-    val liveFlipState: StateFlow<Int> = _liveFlipState.asStateFlow()
+    // Live flip state: a rotating index that drives tile flip animations. It is a
+    // WhileSubscribed flow, so the timer only ticks while a screen (the Start screen) is
+    // actually observing it — it pauses ~5s after the launcher is backgrounded and performs
+    // ZERO database writes (the old heartbeat rewrote weather/calendar rows forever).
+    val liveFlipState: StateFlow<Int> = flow {
+        var i = 0
+        while (true) {
+            emit(i)
+            i = (i + 1) % 4
+            delay(4000)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     // Recent notification trigger for active banner previews (WP style breadcrumbs)
     private val _incomingNotification = MutableStateFlow<String?>(null)
@@ -108,8 +117,6 @@ class LauncherViewModel(
         viewModelScope.launch {
             checkAndProvisionDefaultTiles()
             refreshAppsList()
-            // Periodic Live Tiles heartbeat!
-            launchLiveTilesHeartbeat()
         }
     }
 
@@ -129,55 +136,15 @@ class LauncherViewModel(
             TileEntity(packageName = "wp:calendar", label = "Calendrier", size = "WIDE", position = 10, secondaryText = "14:00 • Design Windows Phone")
         )
         
-        // Wait, check if database is empty by reading current values block
+        // Decide emptiness from a blocking snapshot rather than a cold Flow read, so this is
+        // deterministic (also correct when called again from forceDefaultLayout()).
         withContext(Dispatchers.IO) {
-            val current = repository.allTiles.firstOrNull() ?: emptyList()
+            val current = repository.getAllTilesBlock()
             if (current.isEmpty()) {
                 repository.insertTiles(defaultTiles)
             }
-            val existingSettings = repository.getSettingsDirect()
-            // Pre-provison settings if null
-        }
-    }
-
-    private fun launchLiveTilesHeartbeat() {
-        viewModelScope.launch {
-            while (true) {
-                delay(4000)
-                _liveFlipState.value = (_liveFlipState.value + 1) % 4
-                
-                // Randomly trigger mock live update sometimes to prove dyn tiles are working
-                if (_liveFlipState.value == 2) {
-                    updateLiveTileContent()
-                }
-            }
-        }
-    }
-
-    private suspend fun updateLiveTileContent() {
-        val currentTiles = tiles.value
-        val weatherTile = currentTiles.find { it.packageName == "wp:weather" }
-        if (weatherTile != null) {
-            val forecasts = listOf(
-                "Paris • 19°C Nuageux",
-                "Paris • 22°C Soleil",
-                "Paris • 17°C Pluie légère",
-                "Paris • 24°C Éclaircies"
-            )
-            val randomForecast = forecasts.random()
-            repository.updateTile(weatherTile.copy(secondaryText = randomForecast))
-        }
-
-        val calendarTile = currentTiles.find { it.packageName == "wp:calendar" }
-        if (calendarTile != null) {
-            val events = listOf(
-                "14:00 • Design Windows Phone",
-                "16:30 • Boire un café",
-                "Demain • Déploiement de l'App",
-                "Aucun événement pour aujourd'hui"
-            )
-            val randomEvent = events.random()
-            repository.updateTile(calendarTile.copy(secondaryText = randomEvent))
+            // Ensure a persisted settings row exists (getSettingsDirect inserts the default if absent).
+            repository.getSettingsDirect()
         }
     }
 
@@ -212,8 +179,8 @@ class LauncherViewModel(
             val existing = tiles.value
             val maxPos = existing.maxOfOrNull { it.position } ?: -1
             
-            // Avoid double pining
-            if (existing.any { it.packageName == app.packageName }) {
+            // Avoid double pinning of the same launcher component.
+            if (existing.any { it.packageName == app.packageName && it.className == app.className }) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(context, "${app.label} est déjà épinglé !", Toast.LENGTH_SHORT).show()
                 }
@@ -255,35 +222,28 @@ class LauncherViewModel(
         }
     }
 
-    // Support dragging / tile reordering in position array
-    fun moveTileUp(tile: TileEntity) {
+    // Support tile reordering. We move by INDEX in the in-memory list, then renormalise all
+    // positions to a dense 0..n-1 sequence and persist only the rows that actually changed.
+    // This guarantees positions can never accumulate gaps or duplicates (which would make
+    // ORDER BY position non-deterministic and reorders misbehave).
+    private fun reorder(tile: TileEntity, delta: Int) {
         viewModelScope.launch {
-            val current = tiles.value.toMutableList()
-            val index = current.indexOfFirst { it.id == tile.id }
-            if (index > 0) {
-                // Swap position numbers
-                val tmp = current[index]
-                val prev = current[index - 1]
-                
-                repository.updateTile(tmp.copy(position = prev.position))
-                repository.updateTile(prev.copy(position = tmp.position))
+            val list = tiles.value.toMutableList()
+            val from = list.indexOfFirst { it.id == tile.id }
+            if (from == -1) return@launch
+            val to = from + delta
+            if (to !in list.indices) return@launch
+            list.add(to, list.removeAt(from))
+            val updated = list.mapIndexedNotNull { i, t ->
+                if (t.position != i) t.copy(position = i) else null
             }
+            if (updated.isNotEmpty()) repository.insertTiles(updated)
         }
     }
 
-    fun moveTileDown(tile: TileEntity) {
-        viewModelScope.launch {
-            val current = tiles.value.toMutableList()
-            val index = current.indexOfFirst { it.id == tile.id }
-            if (index != -1 && index < current.size - 1) {
-                val tmp = current[index]
-                val next = current[index + 1]
+    fun moveTileUp(tile: TileEntity) = reorder(tile, -1)
 
-                repository.updateTile(tmp.copy(position = next.position))
-                repository.updateTile(next.copy(position = tmp.position))
-            }
-        }
-    }
+    fun moveTileDown(tile: TileEntity) = reorder(tile, +1)
 
     // Launch appropriate action
     fun launchTile(tile: TileEntity) {
@@ -320,9 +280,8 @@ class LauncherViewModel(
                 }
             } else {
                 // Actual Android App launch
-                val pm = context.packageManager
                 if (tile.packageName.isNotEmpty()) {
-                    val intent = pm.getLaunchIntentForPackage(tile.packageName)
+                    val intent = buildLauncherIntent(tile.packageName, tile.className)
                     if (intent != null) {
                         launchSystemIntent(intent)
                     } else {
@@ -345,14 +304,28 @@ class LauncherViewModel(
         }
     }
 
+    private fun buildLauncherIntent(packageName: String, className: String?): Intent? {
+        val normalizedClassName = className
+            ?.takeIf { it.isNotBlank() }
+            ?.let { if (it.startsWith(".")) packageName + it else it }
+
+        if (normalizedClassName != null) {
+            return Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                component = ComponentName(packageName, normalizedClassName)
+            }
+        }
+
+        return context.packageManager.getLaunchIntentForPackage(packageName)
+    }
+
     // Launch arbitrary app items
     fun launchAppItem(app: AppItem) {
         viewModelScope.launch {
             _isLaunchingApp.value = app.label
             kotlinx.coroutines.delay(650) // Let the turnstile animation fly-in completely
             
-            val pm = context.packageManager
-            val intent = pm.getLaunchIntentForPackage(app.packageName)
+            val intent = buildLauncherIntent(app.packageName, app.className)
             if (intent != null) {
                 launchSystemIntent(intent)
             } else {
@@ -402,7 +375,9 @@ class LauncherViewModel(
 
     // Cortana / Gemini conversational capability
     fun sendCortanaPrompt(prompt: String) {
-        if (prompt.trim().isEmpty()) return
+        // Ignore empty input and re-entrant sends while a reply is still being generated,
+        // otherwise a second prompt interleaves duplicate replies.
+        if (prompt.trim().isEmpty() || _isCortanaThinking.value) return
 
         val userMsg = CortanaMessage("user", prompt)
         _cortanaChat.value = _cortanaChat.value + userMsg
@@ -471,6 +446,15 @@ class LauncherViewModel(
         viewModelScope.launch {
             val curr = settings.value
             repository.saveSettings(curr.copy(isLockScreenEnabled = !curr.isLockScreenEnabled))
+        }
+    }
+
+    // Remember that the user dismissed the "set as default launcher" prompt, so we apply a
+    // re-prompt cooldown instead of nagging on every cold start.
+    fun markDefaultPromptDismissed() {
+        viewModelScope.launch {
+            val curr = settings.value
+            repository.saveSettings(curr.copy(defaultPromptDismissedAt = System.currentTimeMillis()))
         }
     }
 

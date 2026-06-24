@@ -26,9 +26,15 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
+import com.example.ui.theme.parseAccent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,7 +58,7 @@ fun StartScreen(
     val liveFlipState by viewModel.liveFlipState.collectAsState()
     val installedApps by viewModel.installedApps.collectAsState()
 
-    val accentColor = Color(android.graphics.Color.parseColor(settings.accentColorHex))
+    val accentColor = parseAccent(settings.accentColorHex)
     val maxSpan = if (settings.useThreeColumns) 6 else 4
 
     // Dynamic tile packing to arrange SMALL (1x1), MEDIUM (2x2), WIDE (4x2 / 6x2)
@@ -90,20 +96,34 @@ fun StartScreen(
         modifier = modifier
             .fillMaxSize()
             .then(backgroundModifier)
+            .pointerInput(isEditMode) {
+                if (!isEditMode) {
+                    // WP signature: swipe LEFT to slide over to the apps list.
+                    var dx = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { dx = 0f },
+                        onDragEnd = {
+                            if (dx < -60f) viewModel.setScreen(ActiveScreen.ALL_APPS)
+                            dx = 0f
+                        },
+                        onDragCancel = { dx = 0f }
+                    ) { _, amount -> dx += amount }
+                }
+            }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
         ) {
-            // Header: "début" in thin WP-style title
+            // Header: lowercase WP-style thin title
             Text(
                 text = "accueil",
-                fontSize = 44.sp,
+                fontSize = 32.sp,
                 fontWeight = FontWeight.ExtraLight,
                 color = if (settings.isDarkTheme) Color.White else Color.Black,
                 modifier = Modifier
-                    .padding(start = 20.dp, top = 20.dp, bottom = 12.dp)
+                    .padding(start = 12.dp, top = 8.dp, bottom = 6.dp)
                     .combinedClickable(
                         onClick = { if (isEditMode) viewModel.setEditMode(false) },
                         onLongClick = { viewModel.setEditMode(true) }
@@ -149,11 +169,12 @@ fun StartScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp)
+                    // WP: tiles flush to the LEFT with a fixed right gutter (resize affordance).
+                    .padding(start = 12.dp, end = 28.dp, top = 4.dp)
             ) {
                 val totalWidth = maxWidth
                 val maxSpanVal = maxSpan
-                val gap = 8.dp
+                val gap = 6.dp
                 val singleSpanWidth = (totalWidth - gap * (maxSpanVal - 1)) / maxSpanVal
                 
                 val smallTileHeight = singleSpanWidth
@@ -255,12 +276,16 @@ fun PhoneTile(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit
 ) {
+    // This tile's own accent (custom override, else the global accent), crash-safe.
+    val tileAccent = remember(tile.customAccentColor, accentColor) {
+        tile.customAccentColor?.let { parseAccent(it) } ?: accentColor
+    }
     val backgroundColor = if (settings.useWallpaperBackground) {
-        if (settings.isDarkTheme) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.12f)
-    } else if (tile.customAccentColor != null) {
-        Color(android.graphics.Color.parseColor(tile.customAccentColor))
+        // WP "transparent tile" mode: wallpaper shows through, but a faint accent-tinted plane
+        // keeps each tile's colour identity instead of flattening everything to grey.
+        tileAccent.copy(alpha = 0.45f)
     } else {
-        accentColor
+        tileAccent
     }
 
     // Determine if we should show secondary animated content
@@ -271,19 +296,48 @@ fun PhoneTile(
         }
     }
 
-    var isPressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.93f else if (isEditMode) 0.96f else 1f,
+    // WP signature press: the tile TILTS in 3D toward the finger and depresses, then springs back.
+    var tileSize by remember { mutableStateOf(IntSize.Zero) }
+    var pressOffset by remember { mutableStateOf<Offset?>(null) }
+    val released = pressOffset == null
+    val hasSize = tileSize.width > 0 && tileSize.height > 0
+    val nx = if (!released && hasSize) ((pressOffset!!.x / tileSize.width) * 2f - 1f).coerceIn(-1f, 1f) else 0f
+    val ny = if (!released && hasSize) ((pressOffset!!.y / tileSize.height) * 2f - 1f).coerceIn(-1f, 1f) else 0f
+    val maxTilt = 10f
+    val tiltX by animateFloatAsState(
+        targetValue = if (released) 0f else -ny * maxTilt,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
+        label = "tile_rotX"
+    )
+    val tiltY by animateFloatAsState(
+        targetValue = if (released) 0f else nx * maxTilt,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
+        label = "tile_rotY"
+    )
+    val pressScale by animateFloatAsState(
+        targetValue = if (released) (if (isEditMode) 0.96f else 1f) else 0.95f,
         animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "tile_scale"
+    )
+
+    // Real WP 3D live-tile flip, pivoting on the bottom edge.
+    val flipAngle by animateFloatAsState(
+        targetValue = if (isFlipped) 180f else 0f,
+        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+        label = "tile_flip"
     )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .onSizeChanged { tileSize = it }
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                rotationX = tiltX
+                rotationY = tiltY
+                scaleX = pressScale
+                scaleY = pressScale
+                cameraDistance = 12f * density
+                transformOrigin = TransformOrigin.Center
             }
             .padding(2.dp)
             .clip(RoundedCornerShape(0.dp)) // Flat geometric blocks!
@@ -294,15 +348,15 @@ fun PhoneTile(
             )
             .pointerInput(isEditMode) {
                 detectTapGestures(
-                    onPress = {
+                    onPress = { offset ->
                         if (!isEditMode) {
-                            isPressed = true
+                            pressOffset = offset
                             try {
                                 this.tryAwaitRelease()
                             } catch (e: Exception) {
                                 // fallback
                             }
-                            isPressed = false
+                            pressOffset = null
                         }
                     },
                     onTap = { if (!isEditMode) onLaunch() },
@@ -310,20 +364,30 @@ fun PhoneTile(
                 )
             }
     ) {
-        // Tile Primary content
-        Box(modifier = Modifier.fillMaxSize()) {
-            AnimatedContent(
-                targetState = isFlipped,
-                transitionSpec = {
-                    slideInVertically { height -> height } + fadeIn() togetherWith
-                            slideOutVertically { height -> -height } + fadeOut()
-                },
-                label = "TileFlip"
-            ) { flipped ->
-                if (flipped) {
+        // Tile primary content with a real 3D flip between front and back
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    rotationX = flipAngle
+                    cameraDistance = 14f * density
+                    transformOrigin = TransformOrigin(0.5f, 1f)
+                }
+        ) {
+            if (flipAngle <= 90f) {
+                TileFrontState(tile, settings, installedApps)
+            } else {
+                // Counter-rotate the back face so its text is not mirrored.
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            rotationX = 180f
+                            cameraDistance = 14f * density
+                            transformOrigin = TransformOrigin(0.5f, 1f)
+                        }
+                ) {
                     TileBackState(tile, settings)
-                } else {
-                    TileFrontState(tile, settings, installedApps)
                 }
             }
         }
@@ -453,7 +517,7 @@ fun TileFrontState(
                         text = "Horloge",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.7f),
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Normal
                     )
                 }
             } else if (tile.packageName == "wp:photos" && !isSmall) {
@@ -481,13 +545,48 @@ fun TileFrontState(
                                 text = "Photos",
                                 color = Color.White,
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            } else if (isWide) {
+                // Wide data tiles exploit the horizontal real estate (WP Calendar/Météo style).
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Icon(
+                        imageVector = vectorIcon,
+                        contentDescription = tile.label,
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = tile.label,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Normal
+                        )
+                        tile.secondaryText?.let { secondary ->
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = secondary,
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 12.sp,
+                                lineHeight = 14.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
             } else {
-                // Vector icon centerpiece
+                // Vector icon centerpiece (SMALL / MEDIUM)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -507,7 +606,9 @@ fun TileFrontState(
                             text = tile.label,
                             color = Color.White,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.align(Alignment.BottomStart)
                         )
                     }
@@ -548,7 +649,7 @@ fun TileFrontState(
                         text = tile.label,
                         color = Color.White,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.align(Alignment.BottomStart)
@@ -557,12 +658,13 @@ fun TileFrontState(
             }
         }
 
-        // Render dynamic Notification badges in bottom-right corner! (like Phone unread count)
+        // Unread count badge in the TOP-right corner so it never collides with the
+        // bottom-left tile label (WP-style count chip).
         if (tile.unreadCount > 0) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = 12.dp)
+                    .align(Alignment.TopEnd)
+                    .padding(end = 8.dp, top = 8.dp)
                     .background(Color.White.copy(alpha = 0.25f), CircleShape)
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {

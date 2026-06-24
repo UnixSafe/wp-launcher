@@ -15,5 +15,9 @@ data class SettingsEntity(
     val useWallpaperBackground: Boolean = false,
     val wallpaperName: String = "Classic Blue",
     val useCortanaVoice: Boolean = true,
-    val isLockScreenEnabled: Boolean = true
+    val isLockScreenEnabled: Boolean = true,
+    // Timestamp (ms) of the last time the user dismissed the "set as default launcher"
+    // prompt with "plus tard". Used to apply a re-prompt cooldown instead of nagging
+    // on every cold start. 0 = never dismissed.
+    val defaultPromptDismissedAt: Long = 0
 )

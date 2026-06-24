@@ -25,7 +25,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.example.data.SettingsEntity
+import com.example.ui.theme.parseAccent
 import com.example.viewmodel.ActiveScreen
 import com.example.viewmodel.CortanaMessage
 import com.example.viewmodel.LauncherViewModel
@@ -40,10 +42,10 @@ fun CortanaScreen(
     val chatMessages by viewModel.cortanaChat.collectAsState()
     val isThinking by viewModel.isCortanaThinking.collectAsState()
 
-    val accentColor = Color(android.graphics.Color.parseColor(settings.accentColorHex))
+    val accentColor = parseAccent(settings.accentColorHex)
     val isDark = settings.isDarkTheme
 
-    var promptText by remember { mutableStateOf("") }
+    var promptText by rememberSaveable { mutableStateOf("") }
     val lazyListState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
@@ -193,7 +195,7 @@ fun CortanaScreen(
                                 if (isDark) Color(0xFF222222) else Color(0xFFEEEEEE),
                                 RoundedCornerShape(16.dp)
                             )
-                            .clickable {
+                            .clickable(enabled = !isThinking) {
                                 promptText = ""
                                 viewModel.sendCortanaPrompt(sug)
                             }
@@ -290,7 +292,7 @@ fun CortanaScreen(
                         modifier = Modifier
                             .size(36.dp)
                             .background(
-                                if (promptText.isNotBlank()) accentColor else Color.Gray.copy(alpha = 0.3f),
+                                if (promptText.isNotBlank() && !isThinking) accentColor else Color.Gray.copy(alpha = 0.3f),
                                 CircleShape
                             )
                     ) {

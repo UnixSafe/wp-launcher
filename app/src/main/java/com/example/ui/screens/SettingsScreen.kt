@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.parseAccent
 import com.example.viewmodel.ActiveScreen
 import com.example.viewmodel.LauncherViewModel
 
@@ -35,7 +36,7 @@ fun SettingsScreen(
 ) {
     val settings by viewModel.settings.collectAsState()
     val isDark = settings.isDarkTheme
-    val accentColor = Color(android.graphics.Color.parseColor(settings.accentColorHex))
+    val accentColor = parseAccent(settings.accentColorHex)
 
     // List of standard beautiful Windows Phone accents
     val accents = listOf(
@@ -93,26 +94,14 @@ fun SettingsScreen(
                 )
             }
 
-            // Tabs indicator placeholder
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = "système",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = accentColor,
-                    modifier = Modifier.padding(end = 24.dp)
-                )
-                Text(
-                    text = "applications",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Light,
-                    color = Color.Gray
-                )
-            }
+            // Single honest section header (WP Settings is a flat scrolling list, not a pivot).
+            Text(
+                text = "système",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = accentColor,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
 
             LazyColumn(
                 modifier = Modifier
@@ -413,7 +402,7 @@ fun SettingsScreen(
                                         val itemIndex = rowIndex * 3 + colIndex
                                         if (itemIndex < accents.size) {
                                             val currentAccent = accents[itemIndex]
-                                            val currentAccentColor = Color(android.graphics.Color.parseColor(currentAccent.hex))
+                                            val currentAccentColor = parseAccent(currentAccent.hex)
                                             val isSelected = settings.accentName == currentAccent.name
 
                                             Box(
