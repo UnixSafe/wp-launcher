@@ -72,6 +72,7 @@ fun StartScreen(
     val appsByPkg = remember(installedApps) { installedApps.associateBy { it.packageName } }
     val useWallpaper = settings.useWallpaperBackground
     val perfMode = settings.performanceMode
+    val wpIcons = settings.wpStyleAppIcons
 
     // Stable callbacks hoisted once so each PhoneTile doesn't allocate 5 fresh closures per recomposition.
     val onLaunch = remember(viewModel) { { t: TileEntity -> viewModel.launchTile(t) } }
@@ -244,6 +245,7 @@ fun StartScreen(
                                         accentColor = accentColor,
                                         useWallpaperBackground = useWallpaper,
                                         performanceMode = perfMode,
+                                        tintIconWhite = wpIcons && (appsByPkg[tile.packageName]?.hasTransparency == true),
                                         isEditMode = isEditMode,
                                         isFlipped = tile.packageName in FLIP_TILES && (liveFlipState % 2 == 1),
                                         tileIcon = if (tile.packageName.startsWith("wp:")) null else appsByPkg[tile.packageName]?.icon,
@@ -285,6 +287,7 @@ fun PhoneTile(
     accentColor: Color,
     useWallpaperBackground: Boolean,
     performanceMode: Boolean,
+    tintIconWhite: Boolean,
     isEditMode: Boolean,
     isFlipped: Boolean,
     tileIcon: Bitmap?,
@@ -399,7 +402,7 @@ fun PhoneTile(
                 if (flipped) {
                     TileBackState(tile)
                 } else {
-                    TileFrontState(tile, useWallpaperBackground, tileIcon)
+                    TileFrontState(tile, useWallpaperBackground, tintIconWhite, tileIcon)
                 }
             }
         } else {
@@ -414,7 +417,7 @@ fun PhoneTile(
                     }
             ) {
                 if (flipAngle <= 90f) {
-                    TileFrontState(tile, useWallpaperBackground, tileIcon)
+                    TileFrontState(tile, useWallpaperBackground, tintIconWhite, tileIcon)
                 } else {
                     // Counter-rotate the back face so its text is not mirrored.
                     Box(
@@ -523,6 +526,7 @@ fun PhoneTile(
 fun TileFrontState(
     tile: TileEntity,
     useWallpaperBackground: Boolean,
+    tintIconWhite: Boolean,
     tileIcon: Bitmap?
 ) {
     val isSmall = tile.size == "SMALL"
@@ -672,6 +676,9 @@ fun TileFrontState(
                     Image(
                         bitmap = iconImage,
                         contentDescription = tile.label,
+                        // WP icon pack: flatten the app icon to a white glyph (only when it has a
+                        // transparent logo shape — full-bleed icons keep their real look).
+                        colorFilter = if (tintIconWhite) ColorFilter.tint(Color.White) else null,
                         modifier = Modifier
                             .size(if (isSmall) 32.dp else 40.dp)
                             .align(if (isSmall) Alignment.Center else Alignment.TopStart)

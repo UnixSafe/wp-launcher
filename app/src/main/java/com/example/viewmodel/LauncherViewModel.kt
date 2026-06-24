@@ -480,6 +480,13 @@ class LauncherViewModel(
         }
     }
 
+    fun toggleWpStyleAppIcons() {
+        viewModelScope.launch {
+            val curr = settings.value
+            repository.saveSettings(curr.copy(wpStyleAppIcons = !curr.wpStyleAppIcons))
+        }
+    }
+
     fun clearCortanaChat() {
         _cortanaChat.value = listOf(
             CortanaMessage("cortana", "Mémoire réinitialisée ! De quoi souhaitez-vous discuter ?")

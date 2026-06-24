@@ -17,7 +17,11 @@ data class AppItem(
     val packageName: String,
     val className: String,
     val label: String,
-    val icon: Bitmap? = null
+    val icon: Bitmap? = null,
+    // True when the icon has a meaningful transparent area (a logo/glyph), so it looks good
+    // rendered as a flat white silhouette. Full-bleed square icons are false (would become a
+    // white square in WP icon mode).
+    val hasTransparency: Boolean = false
 )
 
 class LauncherRepository(
@@ -59,14 +63,38 @@ class LauncherRepository(
             val label = info.loadLabel(pm).toString()
             val rawIcon = info.loadIcon(pm)
             val bitmap = drawableToBitmap(rawIcon)
-            
+
             AppItem(
                 packageName = packageName,
                 className = className,
                 label = label,
-                icon = bitmap
+                icon = bitmap,
+                hasTransparency = bitmap?.let { hasMeaningfulTransparency(it) } ?: false
             )
         }.sortedBy { it.label.lowercase() }
+    }
+
+    // Sample the icon's alpha channel to decide if it has a real transparent area (logo) vs being
+    // a full-bleed square. Cheap (samples ~1/16 of pixels), runs off the main thread at load.
+    private fun hasMeaningfulTransparency(bmp: Bitmap): Boolean {
+        val w = bmp.width
+        val h = bmp.height
+        if (w == 0 || h == 0) return false
+        var transparent = 0
+        var total = 0
+        val step = 4
+        var y = 0
+        while (y < h) {
+            var x = 0
+            while (x < w) {
+                val alpha = (bmp.getPixel(x, y) ushr 24) and 0xFF
+                if (alpha < 240) transparent++
+                total++
+                x += step
+            }
+            y += step
+        }
+        return total > 0 && transparent.toFloat() / total > 0.12f
     }
 
     // Cap rasterized icons to the max displayed size (~44dp). App launcher icons are often

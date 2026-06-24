@@ -24,5 +24,8 @@ data class SettingsEntity(
     // 2D equivalents for weak GPUs. Off by default.
     val performanceMode: Boolean = false,
     // Timestamp (ms) of the last dismissal of the "enable performance mode?" prompt. 0 = never.
-    val perfModePromptDismissedAt: Long = 0
+    val perfModePromptDismissedAt: Long = 0,
+    // Windows Phone icon pack: render third-party app tiles as a flat white glyph on the accent
+    // tile (Metro look) instead of the colourful real icon.
+    val wpStyleAppIcons: Boolean = false
 )

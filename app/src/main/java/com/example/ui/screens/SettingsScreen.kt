@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brightness4
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.AppShortcut
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
@@ -322,6 +323,18 @@ fun SettingsScreen(
                         accentColor = accentColor,
                         isDark = isDark
                     ) { viewModel.toggleLockScreen() }
+                }
+
+                // WP-STYLE APP ICONS TOGGLE
+                item {
+                    SettingToggleRow(
+                        icon = Icons.Default.AppShortcut,
+                        title = "Icônes d'applications Windows Phone",
+                        subtitle = if (settings.wpStyleAppIcons) "Glyphe blanc plat sur tuile (style Metro)" else "Icônes d'origine des applications",
+                        checked = settings.wpStyleAppIcons,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.toggleWpStyleAppIcons() }
                 }
 
                 // CORTANA CATEGORY
