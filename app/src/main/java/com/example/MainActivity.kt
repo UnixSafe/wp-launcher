@@ -110,6 +110,17 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
                 showDefaultLauncherDialog = !isDefault && cooldownPassed && unlocked
             }
 
+            // Performance-mode prompt: offered once (7-day cooldown) on modest hardware when the
+            // mode is off and the launcher is unlocked.
+            val lowEndDevice = remember { isLowEndDevice() }
+            var showPerfDialog by remember { mutableStateOf(false) }
+            LaunchedEffect(settings.performanceMode, settings.perfModePromptDismissedAt, isLocked, settings.isLockScreenEnabled) {
+                val cooldownPassed =
+                    System.currentTimeMillis() - settings.perfModePromptDismissedAt > 7L * 24 * 60 * 60 * 1000
+                val unlocked = !(settings.isLockScreenEnabled && isLocked)
+                showPerfDialog = lowEndDevice && !settings.performanceMode && cooldownPassed && unlocked
+            }
+
             MyApplicationTheme(
                 darkTheme = settings.isDarkTheme,
                 accentColorHex = settings.accentColorHex
@@ -259,7 +270,7 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
                         )
                     }
 
-                    // DEFAULT LAUNCHER DIALOG
+                    // DEFAULT LAUNCHER DIALOG (takes precedence over the perf prompt)
                     if (showDefaultLauncherDialog) {
                         MetroDefaultLauncherDialog(
                             isDark = settings.isDarkTheme,
@@ -271,6 +282,19 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
                             onConfirm = {
                                 showDefaultLauncherDialog = false
                                 launchDefaultHomeSetup()
+                            }
+                        )
+                    } else if (showPerfDialog) {
+                        PerformanceModeDialog(
+                            isDark = settings.isDarkTheme,
+                            accentColor = accentColor,
+                            onDismiss = {
+                                viewModel.markPerfModePromptDismissed()
+                                showPerfDialog = false
+                            },
+                            onEnable = {
+                                viewModel.setPerformanceMode(true)
+                                showPerfDialog = false
                             }
                         )
                     }
@@ -378,6 +402,17 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
                 android.widget.Toast.LENGTH_LONG
             ).show()
         }
+    }
+
+    /** Heuristic for "modest hardware" that benefits from the simplified animations. */
+    private fun isLowEndDevice(): Boolean {
+        val am = getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        if (am.isLowRamDevice) return true
+        val mi = android.app.ActivityManager.MemoryInfo()
+        am.getMemoryInfo(mi)
+        val lowRam = mi.totalMem in 1..(3L * 1024 * 1024 * 1024) // < 3 GB
+        val fewCores = Runtime.getRuntime().availableProcessors() <= 4
+        return lowRam && fewCores
     }
 
     private fun ensureTts() {

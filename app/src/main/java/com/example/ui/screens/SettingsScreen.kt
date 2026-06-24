@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.SignalCellularAlt
 import androidx.compose.material.icons.filled.Wallpaper
@@ -365,6 +366,19 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
+                }
+
+                // PERFORMANCE CATEGORY
+                item { SettingsCategoryHeader("performance", accentColor) }
+                item {
+                    SettingToggleRow(
+                        icon = Icons.Default.Speed,
+                        title = "Mode performance",
+                        subtitle = if (settings.performanceMode) "Animations simplifiées (plus fluide)" else "Animations 3D complètes",
+                        checked = settings.performanceMode,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.togglePerformanceMode() }
                 }
 
                 // ACCENT COLOR PICKER

@@ -458,6 +458,28 @@ class LauncherViewModel(
         }
     }
 
+    // Performance mode (simplified 2D animations for weak GPUs).
+    fun togglePerformanceMode() {
+        viewModelScope.launch {
+            val curr = settings.value
+            repository.saveSettings(curr.copy(performanceMode = !curr.performanceMode))
+        }
+    }
+
+    fun setPerformanceMode(enabled: Boolean) {
+        viewModelScope.launch {
+            val curr = settings.value
+            repository.saveSettings(curr.copy(performanceMode = enabled))
+        }
+    }
+
+    fun markPerfModePromptDismissed() {
+        viewModelScope.launch {
+            val curr = settings.value
+            repository.saveSettings(curr.copy(perfModePromptDismissedAt = System.currentTimeMillis()))
+        }
+    }
+
     fun clearCortanaChat() {
         _cortanaChat.value = listOf(
             CortanaMessage("cortana", "Mémoire réinitialisée ! De quoi souhaitez-vous discuter ?")

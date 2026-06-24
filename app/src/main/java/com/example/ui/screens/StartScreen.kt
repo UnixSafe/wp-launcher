@@ -71,6 +71,7 @@ fun StartScreen(
     // an O(N) scan inside every tile's composition.
     val appsByPkg = remember(installedApps) { installedApps.associateBy { it.packageName } }
     val useWallpaper = settings.useWallpaperBackground
+    val perfMode = settings.performanceMode
 
     // Stable callbacks hoisted once so each PhoneTile doesn't allocate 5 fresh closures per recomposition.
     val onLaunch = remember(viewModel) { { t: TileEntity -> viewModel.launchTile(t) } }
@@ -242,6 +243,7 @@ fun StartScreen(
                                         tile = tile,
                                         accentColor = accentColor,
                                         useWallpaperBackground = useWallpaper,
+                                        performanceMode = perfMode,
                                         isEditMode = isEditMode,
                                         isFlipped = tile.packageName in FLIP_TILES && (liveFlipState % 2 == 1),
                                         tileIcon = if (tile.packageName.startsWith("wp:")) null else appsByPkg[tile.packageName]?.icon,
@@ -282,6 +284,7 @@ fun PhoneTile(
     tile: TileEntity,
     accentColor: Color,
     useWallpaperBackground: Boolean,
+    performanceMode: Boolean,
     isEditMode: Boolean,
     isFlipped: Boolean,
     tileIcon: Bitmap?,
@@ -336,20 +339,24 @@ fun PhoneTile(
 
     // Only allocate the 3D transform layers while actually animating: a tile AT REST carries ZERO
     // graphicsLayers (no offscreen render target), which is the big GPU/overdraw saving on a weak GPU.
-    val restScale = if (isEditMode) 0.96f else 1f
-    val isResting = released && tiltX == 0f && tiltY == 0f && pressScale == restScale
-    val tileLayerMod = if (isResting) Modifier else Modifier.graphicsLayer {
-        rotationX = tiltX
-        rotationY = tiltY
-        scaleX = pressScale
-        scaleY = pressScale
-        cameraDistance = 12f * density
-        transformOrigin = TransformOrigin.Center
-    }
-    val flipLayerMod = if (flipAngle == 0f) Modifier else Modifier.graphicsLayer {
-        rotationX = flipAngle
-        cameraDistance = 14f * density
-        transformOrigin = TransformOrigin(0.5f, 1f)
+    // The animated values are read INSIDE the graphicsLayer lambda (deferred), so animating
+    // tilt/scale re-draws the layer WITHOUT triggering per-frame recomposition — important on a
+    // weak CPU where composition/layout, not the GPU, is the bottleneck.
+    val tileLayerMod = if (performanceMode) {
+        // Performance mode: cheap 2D scale only (no 3D rotation / offscreen projection).
+        Modifier.graphicsLayer {
+            scaleX = pressScale
+            scaleY = pressScale
+        }
+    } else {
+        Modifier.graphicsLayer {
+            rotationX = tiltX
+            rotationY = tiltY
+            scaleX = pressScale
+            scaleY = pressScale
+            cameraDistance = 12f * density
+            transformOrigin = TransformOrigin.Center
+        }
     }
 
     Box(
@@ -382,26 +389,45 @@ fun PhoneTile(
                 )
             }
     ) {
-        // Tile primary content with a real 3D flip between front and back
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .then(flipLayerMod)
-        ) {
-            if (flipAngle <= 90f) {
-                TileFrontState(tile, useWallpaperBackground, tileIcon)
-            } else {
-                // Counter-rotate the back face so its text is not mirrored.
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer {
-                            rotationX = 180f
-                            cameraDistance = 14f * density
-                            transformOrigin = TransformOrigin(0.5f, 1f)
-                        }
-                ) {
+        if (performanceMode) {
+            // Cheap 2D crossfade between front and back instead of a 3D rotation.
+            Crossfade(
+                targetState = isFlipped,
+                animationSpec = tween(durationMillis = 450),
+                label = "tile_crossfade"
+            ) { flipped ->
+                if (flipped) {
                     TileBackState(tile)
+                } else {
+                    TileFrontState(tile, useWallpaperBackground, tileIcon)
+                }
+            }
+        } else {
+            // Tile primary content with a real 3D flip between front and back (deferred read)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        rotationX = flipAngle
+                        cameraDistance = 14f * density
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                    }
+            ) {
+                if (flipAngle <= 90f) {
+                    TileFrontState(tile, useWallpaperBackground, tileIcon)
+                } else {
+                    // Counter-rotate the back face so its text is not mirrored.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                rotationX = 180f
+                                cameraDistance = 14f * density
+                                transformOrigin = TransformOrigin(0.5f, 1f)
+                            }
+                    ) {
+                        TileBackState(tile)
+                    }
                 }
             }
         }
