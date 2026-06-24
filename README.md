@@ -33,6 +33,14 @@ If you ever missed your Lumia, this is for you.
 A full ~53-second narrated walkthrough is included in the repo, in both languages:
 
 - 🇫🇷 [WP Launcher — Présentation (FR)](presentation/WP-Launcher-presentation-FR.mp4)
+
+
+https://github.com/user-attachments/assets/d5e764ea-4bbc-4568-a97f-2e6a1af0832e
+
+
+
+
+- 
 - 🇬🇧 [WP Launcher — Presentation (EN)](presentation/WP-Launcher-presentation-EN.mp4)
 
 The animated preview at the top of this page (`presentation/demo.gif`) gives you a quick taste.
