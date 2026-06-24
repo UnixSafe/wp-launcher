@@ -26,11 +26,17 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.input.pointer.pointerInput
 import com.example.data.SettingsEntity
 import com.example.repository.AppItem
+import com.example.ui.theme.parseAccent
 import com.example.viewmodel.ActiveScreen
 import com.example.viewmodel.LauncherViewModel
 import kotlinx.coroutines.launch
+import java.text.Normalizer
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -42,8 +48,9 @@ fun AllAppsScreen(
     val installedApps by viewModel.installedApps.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
 
-    val accentColor = Color(android.graphics.Color.parseColor(settings.accentColorHex))
+    val accentColor = parseAccent(settings.accentColorHex)
     val isDark = settings.isDarkTheme
+    val isSearching = searchQuery.isNotBlank()
 
     // Filter apps based on search
     val filteredApps = remember(installedApps, searchQuery) {
@@ -54,12 +61,9 @@ fun AllAppsScreen(
         }
     }
 
-    // Group apps alphabetically
+    // Group apps alphabetically (accent-folded so É/Ç/À file under their base letter).
     val groupedApps = remember(filteredApps) {
-        filteredApps.groupBy {
-            val char = it.label.firstOrNull()?.uppercaseChar() ?: '#'
-            if (char in 'A'..'Z') char else '#'
-        }
+        filteredApps.groupBy { bucketOf(it.label) }
     }
 
     // List of active letters present
@@ -68,7 +72,7 @@ fun AllAppsScreen(
     }
 
     // Jump List visibility
-    var showJumpList by remember { mutableStateFlowOf(false) }
+    var showJumpList by rememberSaveable { mutableStateOf(false) }
 
     // Floating scroll controller
     val listState = rememberLazyListState()
@@ -93,7 +97,11 @@ fun AllAppsScreen(
     }
 
     // Selected App for Context menu
-    var selectedAppForPin by remember { mutableStateFlowOf<AppItem?>(null) }
+    var selectedAppForPin by remember { mutableStateOf<AppItem?>(null) }
+
+    // Back closes the inner-most overlay first (jump list / pin dialog) before the screen.
+    BackHandler(enabled = showJumpList) { showJumpList = false }
+    BackHandler(enabled = selectedAppForPin != null) { selectedAppForPin = null }
 
     Box(
         modifier = modifier
@@ -101,9 +109,7 @@ fun AllAppsScreen(
             .background(if (isDark) Color.Black else Color.White)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
+            modifier = Modifier.fillMaxSize()
         ) {
             // Header Row: Back arrow and "applications"
             Row(
@@ -205,34 +211,56 @@ fun AllAppsScreen(
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
+                        .pointerInput(Unit) {
+                            // WP: swipe RIGHT to slide back to Start. Lives on the list (below the
+                            // search field in hit-test order) so it never steals the TextField.
+                            var dx = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { dx = 0f },
+                                onDragEnd = {
+                                    if (dx > 60f) viewModel.setScreen(ActiveScreen.START)
+                                    dx = 0f
+                                },
+                                onDragCancel = { dx = 0f }
+                            ) { _, amount -> dx += amount }
+                        }
                 ) {
                     val sortedAlphabet = ('A'..'Z').toList() + '#'
                     
                     sortedAlphabet.forEach { char ->
                         val items = groupedApps[char]
                         if (items != null) {
-                            // Section Alphabet Header Item
-                            item {
-                                Box(
-                                    modifier = Modifier
-                                        .padding(vertical = 12.dp)
-                                        .size(42.dp)
-                                        .background(accentColor)
-                                        .clickable { showJumpList = true },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = char.toString(),
-                                        color = Color.White,
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
+                            // Section Alphabet Header (hidden while searching -> flat filtered list)
+                            if (!isSearching) {
+                                item {
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(vertical = 12.dp)
+                                            .size(42.dp)
+                                            .background(accentColor)
+                                            .clickable(enabled = !isSearching) { showJumpList = true },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = char.toString(),
+                                            color = Color.White,
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
                                 }
                             }
 
-                            // Section Apps List
-                            items(items.size) { appIndex ->
+                            // Section Apps List (keyed by component so scroll reuses nodes and
+                            // search filtering retains per-row state instead of rebinding by index)
+                            items(
+                                count = items.size,
+                                key = { i -> items[i].packageName + "/" + items[i].className },
+                                contentType = { "app" }
+                            ) { appIndex ->
                                 val app = items[appIndex]
+                                // Wrap the Bitmap once per icon, not on every recomposition/fling frame.
+                                val iconImage = remember(app.icon) { app.icon?.asImageBitmap() }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -243,9 +271,9 @@ fun AllAppsScreen(
                                         .padding(vertical = 10.dp, horizontal = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (app.icon != null) {
+                                    if (iconImage != null) {
                                         Image(
-                                            bitmap = app.icon.asImageBitmap(),
+                                            bitmap = iconImage,
                                             contentDescription = app.label,
                                             modifier = Modifier
                                                 .size(44.dp)
@@ -281,7 +309,7 @@ fun AllAppsScreen(
                     }
 
                     item {
-                        Spacer(modifier = Modifier.height(60.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
                     }
                 }
             }
@@ -406,5 +434,11 @@ fun AllAppsScreen(
     }
 }
 
-// Fluent StateFlow extension
-fun <T> mutableStateFlowOf(value: T) = mutableStateOf(value)
+// Accent-folded alphabetical bucket so French accented labels (É, Ç, À...) file under
+// their base letter instead of the '#' bucket.
+private fun bucketOf(label: String): Char {
+    val first = label.trim().firstOrNull() ?: return '#'
+    val folded = Normalizer.normalize(first.toString(), Normalizer.Form.NFD)
+        .firstOrNull()?.uppercaseChar() ?: '#'
+    return if (folded in 'A'..'Z') folded else '#'
+}

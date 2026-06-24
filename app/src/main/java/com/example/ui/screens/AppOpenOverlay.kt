@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -27,7 +28,8 @@ fun LauncherAppOpenOverlay(
     }
 
     val scale by animateFloatAsState(
-        targetValue = if (startAnim) 1f else 0.82f,
+        // Minimal scale so the turnstile rotation reads cleanly (was 0.82f, too much).
+        targetValue = if (startAnim) 1f else 0.94f,
         animationSpec = tween(500, easing = LinearOutSlowInEasing),
         label = "overlay_scale"
     )
@@ -39,7 +41,7 @@ fun LauncherAppOpenOverlay(
     )
 
     val rotationAngleY by animateFloatAsState(
-        targetValue = if (startAnim) 0f else -25f, // WP turnstile rotation!
+        targetValue = if (startAnim) 0f else -78f, // WP turnstile: door-hinge swing
         animationSpec = tween(550, easing = LinearOutSlowInEasing),
         label = "overlay_rot"
     )
@@ -48,11 +50,12 @@ fun LauncherAppOpenOverlay(
         modifier = modifier
             .fillMaxSize()
             .graphicsLayer {
+                transformOrigin = TransformOrigin(0f, 0.5f) // hinge on the LEFT edge (WP turnstile)
+                rotationY = rotationAngleY
+                alpha = opacity
                 scaleX = scale
                 scaleY = scale
-                alpha = opacity
-                rotationY = rotationAngleY
-                cameraDistance = 12f * density
+                cameraDistance = 16f * density
             }
             .background(accentColor)
             .statusBarsPadding()

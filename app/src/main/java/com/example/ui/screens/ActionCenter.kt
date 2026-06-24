@@ -23,8 +23,10 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.parseAccent
 import com.example.viewmodel.ActiveScreen
 import com.example.viewmodel.LauncherViewModel
+import java.util.Calendar
 
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
@@ -42,8 +44,19 @@ fun ActionCenter(
     var isAirplaneMode by remember { mutableStateOf(false) }
     var isLocationOn by remember { mutableStateOf(true) }
 
-    val accentColor = Color(android.graphics.Color.parseColor(settings.accentColorHex))
+    val accentColor = parseAccent(settings.accentColorHex)
     val isDark = settings.isDarkTheme
+
+    // Live header date (was hardcoded "Vendredi 19 Juin"); refreshed each time the center opens.
+    val frenchDays = listOf("", "dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi")
+    val frenchMonths = listOf("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
+    var now by remember { mutableStateOf(Calendar.getInstance()) }
+    LaunchedEffect(isOpen) { if (isOpen) now = Calendar.getInstance() }
+    val headerDate = remember(now) {
+        val d = frenchDays.getOrElse(now.get(Calendar.DAY_OF_WEEK)) { "" }.replaceFirstChar { it.uppercase() }
+        val mo = frenchMonths.getOrElse(now.get(Calendar.MONTH)) { "" }
+        "$d ${now.get(Calendar.DAY_OF_MONTH)} $mo"
+    }
 
     // Sliding Top Sheet
     AnimatedVisibility(
@@ -62,21 +75,18 @@ fun ActionCenter(
                 .pointerInput(Unit) {
                     var accumulatedDrag = 0f
                     detectVerticalDragGestures(
-                        onDragEnd = {
-                            if (accumulatedDrag < -15f) {
-                                onClose()
-                            }
-                            accumulatedDrag = 0f
-                        },
-                        onDragCancel = {
-                            accumulatedDrag = 0f
-                        },
+                        onDragStart = { accumulatedDrag = 0f },
                         onVerticalDrag = { change, dragAmount ->
                             accumulatedDrag += dragAmount
-                            if (accumulatedDrag < -60f) {
-                                onClose()
-                            }
-                        }
+                            change.consume()
+                        },
+                        // Decide dismissal only on release (was firing repeatedly mid-drag,
+                        // snapping the sheet shut while the finger was still down).
+                        onDragEnd = {
+                            if (accumulatedDrag < -60f) onClose()
+                            accumulatedDrag = 0f
+                        },
+                        onDragCancel = { accumulatedDrag = 0f }
                     )
                 }
         ) {
@@ -101,7 +111,7 @@ fun ActionCenter(
                             letterSpacing = 1.sp
                         )
                         Text(
-                            text = "Vendredi 19 Juin",
+                            text = headerDate,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Thin,
                             color = if (isDark) Color.White else Color.Black

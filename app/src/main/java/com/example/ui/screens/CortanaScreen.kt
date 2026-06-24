@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -25,7 +26,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.example.data.SettingsEntity
+import com.example.ui.theme.parseAccent
 import com.example.viewmodel.ActiveScreen
 import com.example.viewmodel.CortanaMessage
 import com.example.viewmodel.LauncherViewModel
@@ -40,10 +43,10 @@ fun CortanaScreen(
     val chatMessages by viewModel.cortanaChat.collectAsState()
     val isThinking by viewModel.isCortanaThinking.collectAsState()
 
-    val accentColor = Color(android.graphics.Color.parseColor(settings.accentColorHex))
+    val accentColor = parseAccent(settings.accentColorHex)
     val isDark = settings.isDarkTheme
 
-    var promptText by remember { mutableStateOf("") }
+    var promptText by rememberSaveable { mutableStateOf("") }
     val lazyListState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
 
@@ -59,12 +62,10 @@ fun CortanaScreen(
         label = "CircleBreathScale"
     )
 
-    // Scroll to bottom when message list updates
-    LaunchedEffect(chatMessages.size) {
+    // Scroll to bottom when the message list grows OR the thinking state flips.
+    LaunchedEffect(chatMessages.size, isThinking) {
         if (chatMessages.isNotEmpty()) {
-            coroutineScope.launch {
-                lazyListState.animateScrollToItem(chatMessages.size - 1)
-            }
+            lazyListState.animateScrollToItem(chatMessages.size - 1)
         }
     }
 
@@ -82,9 +83,7 @@ fun CortanaScreen(
             .background(if (isDark) Color.Black else Color.White)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
+            modifier = Modifier.fillMaxSize()
         ) {
             // Header Row: Back, Title, Clear chats
             Row(
@@ -179,21 +178,24 @@ fun CortanaScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Suggestions horizontal list (Badges)
-            Row(
+            // Suggestions: a single horizontally-scrollable strip (was a fixed Row that
+            // overflowed — the 4 chips were wider than the screen, squashing the last chip
+            // into a tall column that pushed the chat + input bar off-screen).
+            LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                suggestions.forEach { sug ->
+                items(suggestions) { sug ->
                     Box(
                         modifier = Modifier
                             .background(
                                 if (isDark) Color(0xFF222222) else Color(0xFFEEEEEE),
                                 RoundedCornerShape(16.dp)
                             )
-                            .clickable {
+                            .clickable(enabled = !isThinking) {
                                 promptText = ""
                                 viewModel.sendCortanaPrompt(sug)
                             }
@@ -203,7 +205,8 @@ fun CortanaScreen(
                             text = sug,
                             color = if (isDark) Color.White else Color.Black,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
                         )
                     }
                 }
@@ -290,7 +293,7 @@ fun CortanaScreen(
                         modifier = Modifier
                             .size(36.dp)
                             .background(
-                                if (promptText.isNotBlank()) accentColor else Color.Gray.copy(alpha = 0.3f),
+                                if (promptText.isNotBlank() && !isThinking) accentColor else Color.Gray.copy(alpha = 0.3f),
                                 CircleShape
                             )
                     ) {

@@ -7,6 +7,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -26,9 +27,15 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.IntSize
+import com.example.ui.theme.parseAccent
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -52,7 +59,7 @@ fun StartScreen(
     val liveFlipState by viewModel.liveFlipState.collectAsState()
     val installedApps by viewModel.installedApps.collectAsState()
 
-    val accentColor = Color(android.graphics.Color.parseColor(settings.accentColorHex))
+    val accentColor = remember(settings.accentColorHex) { parseAccent(settings.accentColorHex) }
     val maxSpan = if (settings.useThreeColumns) 6 else 4
 
     // Dynamic tile packing to arrange SMALL (1x1), MEDIUM (2x2), WIDE (4x2 / 6x2)
@@ -60,19 +67,35 @@ fun StartScreen(
         packTilesToRows(tiles, maxSpan)
     }
 
+    // Resolve each pinned app's (downscaled) icon by package once — O(1) lookup per tile instead of
+    // an O(N) scan inside every tile's composition.
+    val appsByPkg = remember(installedApps) { installedApps.associateBy { it.packageName } }
+    val useWallpaper = settings.useWallpaperBackground
+    val perfMode = settings.performanceMode
+    val wpIcons = settings.wpStyleAppIcons
+
+    // Stable callbacks hoisted once so each PhoneTile doesn't allocate 5 fresh closures per recomposition.
+    val onLaunch = remember(viewModel) { { t: TileEntity -> viewModel.launchTile(t) } }
+    val onUnpin = remember(viewModel) { { t: TileEntity -> viewModel.unpinTile(t) } }
+    val onResize = remember(viewModel) { { t: TileEntity -> viewModel.cycleTileSize(t) } }
+    val onMoveUp = remember(viewModel) { { t: TileEntity -> viewModel.moveTileUp(t) } }
+    val onMoveDown = remember(viewModel) { { t: TileEntity -> viewModel.moveTileDown(t) } }
+
     // Determine lock background brushes based on custom wallpaper selection
     val isDark = settings.isDarkTheme
     val backgroundBrush = remember(settings.useWallpaperBackground, settings.wallpaperName, isDark) {
         if (settings.useWallpaperBackground) {
+            // Richer diagonal multi-stop gradients evoke a W10M full-bleed background that the
+            // translucent tiles bleed through.
             when (settings.wallpaperName) {
-                "Aurora Skies" -> Brush.verticalGradient(
-                    colors = listOf(Color(0xFF3F2B96), Color(0xFF1E0B36))
+                "Aurora Skies" -> Brush.linearGradient(
+                    colors = listOf(Color(0xFF7F00FF), Color(0xFF3F2B96), Color(0xFF12022E))
                 )
-                "Forest Mist" -> Brush.verticalGradient(
-                    colors = listOf(Color(0xFF0F2027), Color(0xFF152A30))
+                "Forest Mist" -> Brush.linearGradient(
+                    colors = listOf(Color(0xFF134E5E), Color(0xFF0F2027), Color(0xFF071318))
                 )
-                else -> Brush.verticalGradient( // Classic Blue Preset
-                    colors = listOf(Color(0xFF001F3F), Color(0xFF001122))
+                else -> Brush.linearGradient( // Classic Blue Preset
+                    colors = listOf(Color(0xFF0078D7), Color(0xFF002B5B), Color(0xFF000814))
                 )
             }
         } else {
@@ -80,35 +103,63 @@ fun StartScreen(
         }
     }
 
-    val backgroundModifier = if (settings.useWallpaperBackground && backgroundBrush != null) {
-        Modifier.background(backgroundBrush)
-    } else {
-        Modifier.background(if (isDark) Color.Black else Color.White)
+    val backgroundModifier = remember(settings.useWallpaperBackground, backgroundBrush, isDark) {
+        if (settings.useWallpaperBackground && backgroundBrush != null) {
+            Modifier.background(backgroundBrush)
+        } else {
+            Modifier.background(if (isDark) Color.Black else Color.White)
+        }
     }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .then(backgroundModifier)
+            .pointerInput(isEditMode) {
+                if (!isEditMode) {
+                    // WP signature: swipe LEFT to slide over to the apps list.
+                    var dx = 0f
+                    detectHorizontalDragGestures(
+                        onDragStart = { dx = 0f },
+                        onDragEnd = {
+                            if (dx < -60f) viewModel.setScreen(ActiveScreen.ALL_APPS)
+                            dx = 0f
+                        },
+                        onDragCancel = { dx = 0f }
+                    ) { _, amount -> dx += amount }
+                }
+            }
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Header: "début" in thin WP-style title
-            Text(
-                text = "accueil",
-                fontSize = 44.sp,
-                fontWeight = FontWeight.ExtraLight,
-                color = if (settings.isDarkTheme) Color.White else Color.Black,
+            // Header: lowercase WP-style thin title + a flat W10M right-edge chevron to the app list
+            Row(
                 modifier = Modifier
-                    .padding(start = 20.dp, top = 20.dp, bottom = 12.dp)
-                    .combinedClickable(
+                    .fillMaxWidth()
+                    .padding(start = 12.dp, end = 18.dp, top = 8.dp, bottom = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "accueil",
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.ExtraLight,
+                    color = if (settings.isDarkTheme) Color.White else Color.Black,
+                    modifier = Modifier.combinedClickable(
                         onClick = { if (isEditMode) viewModel.setEditMode(false) },
                         onLongClick = { viewModel.setEditMode(true) }
                     )
-            )
+                )
+                Icon(
+                    imageVector = Icons.Default.ArrowForwardIos,
+                    contentDescription = "Toutes les applications",
+                    tint = if (settings.isDarkTheme) Color.White else Color.Black,
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clickable { viewModel.setScreen(ActiveScreen.ALL_APPS) }
+                )
+            }
 
             // Edit Mode Alert Banner
             if (isEditMode) {
@@ -149,11 +200,12 @@ fun StartScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp)
+                    // WP: tiles flush to the LEFT with a fixed right gutter (resize affordance).
+                    .padding(start = 12.dp, end = 28.dp, top = 4.dp)
             ) {
                 val totalWidth = maxWidth
                 val maxSpanVal = maxSpan
-                val gap = 8.dp
+                val gap = 6.dp
                 val singleSpanWidth = (totalWidth - gap * (maxSpanVal - 1)) / maxSpanVal
                 
                 val smallTileHeight = singleSpanWidth
@@ -164,14 +216,17 @@ fun StartScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(gap)
                 ) {
-                    items(packedRows.size) { rowIndex ->
+                    items(
+                        count = packedRows.size,
+                        contentType = { "tileRow" }
+                    ) { rowIndex ->
                         val rowItems = packedRows[rowIndex]
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(gap)
                         ) {
                             rowItems.forEach { tile ->
-                                val span = getSpanForSize(tile.size)
+                                val span = effectiveSpan(tile.size, maxSpanVal)
                                 val weight = span.toFloat() / maxSpanVal.toFloat()
                                 val tileHeight = when (tile.size) {
                                     "SMALL" -> smallTileHeight
@@ -187,55 +242,40 @@ fun StartScreen(
                                 ) {
                                     PhoneTile(
                                         tile = tile,
-                                        settings = settings,
                                         accentColor = accentColor,
+                                        useWallpaperBackground = useWallpaper,
+                                        performanceMode = perfMode,
+                                        tintIconWhite = wpIcons && (appsByPkg[tile.packageName]?.hasTransparency == true),
                                         isEditMode = isEditMode,
-                                        liveFlipState = liveFlipState,
-                                        installedApps = installedApps,
-                                        onLaunch = { viewModel.launchTile(tile) },
-                                        onUnpin = { viewModel.unpinTile(tile) },
-                                        onResize = { viewModel.cycleTileSize(tile) },
-                                        onMoveUp = { viewModel.moveTileUp(tile) },
-                                        onMoveDown = { viewModel.moveTileDown(tile) }
+                                        isFlipped = tile.packageName in FLIP_TILES && (liveFlipState % 2 == 1),
+                                        tileIcon = if (tile.packageName.startsWith("wp:")) null else appsByPkg[tile.packageName]?.icon,
+                                        onLaunch = onLaunch,
+                                        onUnpin = onUnpin,
+                                        onResize = onResize,
+                                        onMoveUp = onMoveUp,
+                                        onMoveDown = onMoveDown
                                     )
                                 }
                             }
                             
                             // Fill empty gaps in rows back with transparent filler if necessary
-                            val currentSum = rowItems.sumOf { getSpanForSize(it.size) }
+                            val currentSum = rowItems.sumOf { effectiveSpan(it.size, maxSpanVal) }
                             if (currentSum < maxSpanVal) {
                                 Spacer(modifier = Modifier.weight((maxSpanVal - currentSum).toFloat() / maxSpanVal.toFloat()))
                             }
                         }
                     }
 
-                    // Bottom padding
+                    // Bottom breathing space (nav-bar inset is handled by MainActivity now)
                     item {
-                        Spacer(modifier = Modifier.height(80.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
                     }
                 }
             }
         }
 
-        // Floating navigation button to swipes to All Apps
-        IconButton(
-            onClick = { viewModel.setScreen(ActiveScreen.ALL_APPS) },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = 24.dp)
-                .size(48.dp)
-                .background(
-                    if (settings.isDarkTheme) Color(0xFF222222) else Color(0xFFDDDDDD),
-                    CircleShape
-                )
-                .border(2.dp, if (settings.isDarkTheme) Color.White else Color.Black, CircleShape)
-        ) {
-            Icon(
-                imageVector = Icons.Default.ArrowForward,
-                contentDescription = "Toutes les applications",
-                tint = if (settings.isDarkTheme) Color.White else Color.Black
-            )
-        }
+        // (The circular Material FAB was removed — the app list is reached via the W10M
+        //  header chevron and the left-swipe gesture, which is the authentic Metro affordance.)
     }
 }
 
@@ -244,47 +284,89 @@ fun StartScreen(
 @Composable
 fun PhoneTile(
     tile: TileEntity,
-    settings: SettingsEntity,
     accentColor: Color,
+    useWallpaperBackground: Boolean,
+    performanceMode: Boolean,
+    tintIconWhite: Boolean,
     isEditMode: Boolean,
-    liveFlipState: Int,
-    installedApps: List<AppItem>,
-    onLaunch: () -> Unit,
-    onUnpin: () -> Unit,
-    onResize: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit
+    isFlipped: Boolean,
+    tileIcon: Bitmap?,
+    onLaunch: (TileEntity) -> Unit,
+    onUnpin: (TileEntity) -> Unit,
+    onResize: (TileEntity) -> Unit,
+    onMoveUp: (TileEntity) -> Unit,
+    onMoveDown: (TileEntity) -> Unit
 ) {
-    val backgroundColor = if (settings.useWallpaperBackground) {
-        if (settings.isDarkTheme) Color.White.copy(alpha = 0.16f) else Color.Black.copy(alpha = 0.12f)
-    } else if (tile.customAccentColor != null) {
-        Color(android.graphics.Color.parseColor(tile.customAccentColor))
+    // This tile's own accent (custom override, else the global accent), crash-safe.
+    val tileAccent = remember(tile.customAccentColor, accentColor) {
+        tile.customAccentColor?.let { parseAccent(it) } ?: accentColor
+    }
+    val backgroundColor = if (useWallpaperBackground) {
+        // WP "transparent tile" mode: wallpaper shows through, but a faint accent-tinted plane
+        // keeps each tile's colour identity instead of flattening everything to grey.
+        tileAccent.copy(alpha = 0.45f)
     } else {
-        accentColor
+        tileAccent
     }
 
-    // Determine if we should show secondary animated content
-    val isFlipped = remember(tile.packageName, liveFlipState) {
-        when (tile.packageName) {
-            "wp:weather", "wp:photos", "wp:calendar", "wp:cortana" -> (liveFlipState % 2 == 1)
-            else -> false
-        }
-    }
-
-    var isPressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.93f else if (isEditMode) 0.96f else 1f,
+    // WP signature press: the tile TILTS in 3D toward the finger and depresses, then springs back.
+    var tileSize by remember { mutableStateOf(IntSize.Zero) }
+    var pressOffset by remember { mutableStateOf<Offset?>(null) }
+    val released = pressOffset == null
+    val hasSize = tileSize.width > 0 && tileSize.height > 0
+    val nx = if (!released && hasSize) ((pressOffset!!.x / tileSize.width) * 2f - 1f).coerceIn(-1f, 1f) else 0f
+    val ny = if (!released && hasSize) ((pressOffset!!.y / tileSize.height) * 2f - 1f).coerceIn(-1f, 1f) else 0f
+    val maxTilt = 10f
+    val tiltX by animateFloatAsState(
+        targetValue = if (released) 0f else -ny * maxTilt,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
+        label = "tile_rotX"
+    )
+    val tiltY by animateFloatAsState(
+        targetValue = if (released) 0f else nx * maxTilt,
+        animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMediumLow),
+        label = "tile_rotY"
+    )
+    val pressScale by animateFloatAsState(
+        targetValue = if (released) (if (isEditMode) 0.96f else 1f) else 0.95f,
         animationSpec = spring(stiffness = Spring.StiffnessMedium),
         label = "tile_scale"
     )
 
+    // Real WP 3D live-tile flip, pivoting on the bottom edge.
+    val flipAngle by animateFloatAsState(
+        targetValue = if (isFlipped) 180f else 0f,
+        animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing),
+        label = "tile_flip"
+    )
+
+    // Only allocate the 3D transform layers while actually animating: a tile AT REST carries ZERO
+    // graphicsLayers (no offscreen render target), which is the big GPU/overdraw saving on a weak GPU.
+    // The animated values are read INSIDE the graphicsLayer lambda (deferred), so animating
+    // tilt/scale re-draws the layer WITHOUT triggering per-frame recomposition — important on a
+    // weak CPU where composition/layout, not the GPU, is the bottleneck.
+    val tileLayerMod = if (performanceMode) {
+        // Performance mode: cheap 2D scale only (no 3D rotation / offscreen projection).
+        Modifier.graphicsLayer {
+            scaleX = pressScale
+            scaleY = pressScale
+        }
+    } else {
+        Modifier.graphicsLayer {
+            rotationX = tiltX
+            rotationY = tiltY
+            scaleX = pressScale
+            scaleY = pressScale
+            cameraDistance = 12f * density
+            transformOrigin = TransformOrigin.Center
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
+            .onSizeChanged { tileSize = it }
+            .then(tileLayerMod)
             .padding(2.dp)
             .clip(RoundedCornerShape(0.dp)) // Flat geometric blocks!
             .background(backgroundColor)
@@ -294,36 +376,61 @@ fun PhoneTile(
             )
             .pointerInput(isEditMode) {
                 detectTapGestures(
-                    onPress = {
+                    onPress = { offset ->
                         if (!isEditMode) {
-                            isPressed = true
+                            pressOffset = offset
                             try {
                                 this.tryAwaitRelease()
                             } catch (e: Exception) {
                                 // fallback
                             }
-                            isPressed = false
+                            pressOffset = null
                         }
                     },
-                    onTap = { if (!isEditMode) onLaunch() },
-                    onLongPress = { onResize() }
+                    onTap = { if (!isEditMode) onLaunch(tile) },
+                    onLongPress = { onResize(tile) }
                 )
             }
     ) {
-        // Tile Primary content
-        Box(modifier = Modifier.fillMaxSize()) {
-            AnimatedContent(
+        if (performanceMode) {
+            // Cheap 2D crossfade between front and back instead of a 3D rotation.
+            Crossfade(
                 targetState = isFlipped,
-                transitionSpec = {
-                    slideInVertically { height -> height } + fadeIn() togetherWith
-                            slideOutVertically { height -> -height } + fadeOut()
-                },
-                label = "TileFlip"
+                animationSpec = tween(durationMillis = 450),
+                label = "tile_crossfade"
             ) { flipped ->
                 if (flipped) {
-                    TileBackState(tile, settings)
+                    TileBackState(tile)
                 } else {
-                    TileFrontState(tile, settings, installedApps)
+                    TileFrontState(tile, useWallpaperBackground, tintIconWhite, tileIcon)
+                }
+            }
+        } else {
+            // Tile primary content with a real 3D flip between front and back (deferred read)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        rotationX = flipAngle
+                        cameraDistance = 14f * density
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                    }
+            ) {
+                if (flipAngle <= 90f) {
+                    TileFrontState(tile, useWallpaperBackground, tintIconWhite, tileIcon)
+                } else {
+                    // Counter-rotate the back face so its text is not mirrored.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer {
+                                rotationX = 180f
+                                cameraDistance = 14f * density
+                                transformOrigin = TransformOrigin(0.5f, 1f)
+                            }
+                    ) {
+                        TileBackState(tile)
+                    }
                 }
             }
         }
@@ -337,7 +444,7 @@ fun PhoneTile(
             ) {
                 // Unpin button (top right)
                 IconButton(
-                    onClick = onUnpin,
+                    onClick = { onUnpin(tile) },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(2.dp)
@@ -355,7 +462,7 @@ fun PhoneTile(
 
                 // Resize button (bottom right)
                 IconButton(
-                    onClick = onResize,
+                    onClick = { onResize(tile) },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(2.dp)
@@ -371,39 +478,42 @@ fun PhoneTile(
                     )
                 }
 
-                // Positional reordering chevrons in the middle
-                Row(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    IconButton(
-                        onClick = onMoveUp,
-                        modifier = Modifier
-                            .size(26.dp)
-                            .background(Color.Black.copy(alpha = 0.8f), CircleShape)
-                            .border(1.dp, Color.White, CircleShape)
+                // Positional reordering chevrons — hidden on SMALL tiles, where the 56dp row
+                // would overflow a 1x1 tile and overlap the corner buttons.
+                if (tile.size != "SMALL") {
+                    Row(
+                        modifier = Modifier.align(Alignment.Center),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowUp,
-                            contentDescription = "Up",
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
+                        IconButton(
+                            onClick = { onMoveUp(tile) },
+                            modifier = Modifier
+                                .size(26.dp)
+                                .background(Color.Black.copy(alpha = 0.8f), CircleShape)
+                                .border(1.dp, Color.White, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowUp,
+                                contentDescription = "Up",
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
 
-                    IconButton(
-                        onClick = onMoveDown,
-                        modifier = Modifier
-                            .size(26.dp)
-                            .background(Color.Black.copy(alpha = 0.8f), CircleShape)
-                            .border(1.dp, Color.White, CircleShape)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
-                            contentDescription = "Down",
-                            tint = Color.White,
-                            modifier = Modifier.size(14.dp)
-                        )
+                        IconButton(
+                            onClick = { onMoveDown(tile) },
+                            modifier = Modifier
+                                .size(26.dp)
+                                .background(Color.Black.copy(alpha = 0.8f), CircleShape)
+                                .border(1.dp, Color.White, CircleShape)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.KeyboardArrowDown,
+                                contentDescription = "Down",
+                                tint = Color.White,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -415,8 +525,9 @@ fun PhoneTile(
 @Composable
 fun TileFrontState(
     tile: TileEntity,
-    settings: SettingsEntity,
-    installedApps: List<AppItem>
+    useWallpaperBackground: Boolean,
+    tintIconWhite: Boolean,
+    tileIcon: Bitmap?
 ) {
     val isSmall = tile.size == "SMALL"
     val isWide = tile.size == "WIDE"
@@ -435,13 +546,14 @@ fun TileFrontState(
                     verticalArrangement = Arrangement.Center,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    val timeString = remember {
-                        val calendar = Calendar.getInstance()
-                        var hrs = calendar.get(Calendar.HOUR_OF_DAY).toString()
-                        var mins = calendar.get(Calendar.MINUTE).toString()
-                        if (hrs.length == 1) hrs = "0$hrs"
-                        if (mins.length == 1) mins = "0$mins"
-                        "$hrs:$mins"
+                    // Live tile clock that flips on the minute boundary (was frozen at first compose).
+                    var timeString by remember { mutableStateOf(currentHmTile()) }
+                    LaunchedEffect(Unit) {
+                        while (true) {
+                            timeString = currentHmTile()
+                            val c = Calendar.getInstance()
+                            kotlinx.coroutines.delay(((60 - c.get(Calendar.SECOND)) * 1000L).coerceAtLeast(1000L))
+                        }
                     }
                     Text(
                         text = timeString,
@@ -453,7 +565,7 @@ fun TileFrontState(
                         text = "Horloge",
                         fontSize = 11.sp,
                         color = Color.White.copy(alpha = 0.7f),
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Normal
                     )
                 }
             } else if (tile.packageName == "wp:photos" && !isSmall) {
@@ -462,7 +574,9 @@ fun TileFrontState(
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(Color(0xFFE25B26))
+                            // Keep the photo-collage orange only in solid mode; in transparent
+                            // wallpaper mode let the tile background (and wallpaper) show through.
+                            .then(if (!useWallpaperBackground) Modifier.background(Color(0xFFE25B26)) else Modifier)
                     ) {
                         Column(
                             modifier = Modifier
@@ -481,13 +595,48 @@ fun TileFrontState(
                                 text = "Photos",
                                 color = Color.White,
                                 fontSize = 14.sp,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Normal
+                            )
+                        }
+                    }
+                }
+            } else if (isWide) {
+                // Wide data tiles exploit the horizontal real estate (WP Calendar/Météo style).
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    Icon(
+                        imageVector = vectorIcon,
+                        contentDescription = tile.label,
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = tile.label,
+                            color = Color.White,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Normal
+                        )
+                        tile.secondaryText?.let { secondary ->
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = secondary,
+                                color = Color.White.copy(alpha = 0.85f),
+                                fontSize = 12.sp,
+                                lineHeight = 14.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                     }
                 }
             } else {
-                // Vector icon centerpiece
+                // Vector icon centerpiece (SMALL / MEDIUM)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -507,27 +656,29 @@ fun TileFrontState(
                             text = tile.label,
                             color = Color.White,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.Normal,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.align(Alignment.BottomStart)
                         )
                     }
                 }
             }
         } else {
-            // Android System application icon drawer
-            val targetApp = remember(tile.packageName, installedApps) {
-                installedApps.find { it.packageName == tile.packageName }
-            }
-
+            // Android System application icon drawer (icon resolved once at the call site)
+            val iconImage = remember(tileIcon) { tileIcon?.asImageBitmap() }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(if (isSmall) 12.dp else 16.dp)
             ) {
-                if (targetApp?.icon != null) {
+                if (iconImage != null) {
                     Image(
-                        bitmap = targetApp.icon.asImageBitmap(),
+                        bitmap = iconImage,
                         contentDescription = tile.label,
+                        // WP icon pack: flatten the app icon to a white glyph (only when it has a
+                        // transparent logo shape — full-bleed icons keep their real look).
+                        colorFilter = if (tintIconWhite) ColorFilter.tint(Color.White) else null,
                         modifier = Modifier
                             .size(if (isSmall) 32.dp else 40.dp)
                             .align(if (isSmall) Alignment.Center else Alignment.TopStart)
@@ -548,7 +699,7 @@ fun TileFrontState(
                         text = tile.label,
                         color = Color.White,
                         fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
+                        fontWeight = FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.align(Alignment.BottomStart)
@@ -557,12 +708,13 @@ fun TileFrontState(
             }
         }
 
-        // Render dynamic Notification badges in bottom-right corner! (like Phone unread count)
+        // Unread count badge in the TOP-right corner so it never collides with the
+        // bottom-left tile label (WP-style count chip).
         if (tile.unreadCount > 0) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 12.dp, bottom = 12.dp)
+                    .align(Alignment.TopEnd)
+                    .padding(end = 8.dp, top = 8.dp)
                     .background(Color.White.copy(alpha = 0.25f), CircleShape)
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
@@ -580,8 +732,7 @@ fun TileFrontState(
 // Side B of Live Tile: Details flipping slide screen (Météo forecasts, Calendar appointments)
 @Composable
 fun TileBackState(
-    tile: TileEntity,
-    settings: SettingsEntity
+    tile: TileEntity
 ) {
     Box(
         modifier = Modifier
@@ -677,6 +828,18 @@ fun TileBackState(
     }
 }
 
+// The only tiles whose front/back live-tile content flips on the 4s tick. Computing flip state at
+// the call site (a plain Boolean) means the other tiles never see the ticking value and are skipped.
+private val FLIP_TILES = setOf("wp:weather", "wp:photos", "wp:calendar", "wp:cortana")
+
+// Minute-resolution HH:mm helper for the live clock tile.
+fun currentHmTile(): String {
+    val c = Calendar.getInstance()
+    val h = c.get(Calendar.HOUR_OF_DAY).toString().padStart(2, '0')
+    val m = c.get(Calendar.MINUTE).toString().padStart(2, '0')
+    return "$h:$m"
+}
+
 // Icon mapper helper
 fun getBuiltInIcon(packageName: String): ImageVector {
     return when (packageName) {
@@ -702,7 +865,7 @@ fun packTilesToRows(tiles: List<TileEntity>, maxSpan: Int): List<List<TileEntity
     var currentSum = 0
 
     tiles.forEach { tile ->
-        val span = getSpanForSize(tile.size)
+        val span = effectiveSpan(tile.size, maxSpan)
         // If the tile cannot fit in the remainder of the current row, wrap!
         if (currentSum + span <= maxSpan) {
             currentRow.add(tile)
@@ -729,3 +892,8 @@ fun getSpanForSize(size: String): Int {
         else -> 2
     }
 }
+
+// A WIDE tile spans the FULL row (= maxSpan), matching W10M's full-width wide tiles, instead of a
+// fixed 4 that leaves a ragged 2-span gap in 3-column (maxSpan=6) mode.
+fun effectiveSpan(size: String, maxSpan: Int): Int =
+    if (size == "WIDE") maxSpan else getSpanForSize(size)

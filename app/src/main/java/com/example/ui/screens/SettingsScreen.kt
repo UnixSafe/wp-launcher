@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,21 +12,126 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Brightness4
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.AppShortcut
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Restore
+import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material.icons.filled.Wallpaper
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.theme.parseAccent
 import com.example.viewmodel.ActiveScreen
 import com.example.viewmodel.LauncherViewModel
 
 data class ColorAccentItem(val name: String, val hex: String)
+
+/** Authentic Windows Phone / Windows 10 Mobile Metro toggle: a flat pill track that fills with
+ *  the accent when on (white thumb on the right), or a thin bordered transparent track when off
+ *  (foreground thumb on the left). Replaces the Material3 Switch which looks like an Android toggle. */
+@Composable
+fun WpToggle(
+    checked: Boolean,
+    onToggle: () -> Unit,
+    accentColor: Color,
+    isDark: Boolean
+) {
+    val trackW = 46.dp
+    val trackH = 20.dp
+    val thumbSize = 12.dp
+    val pad = 4.dp
+    val fg = if (isDark) Color.White else Color.Black
+    val thumbX by animateDpAsState(
+        targetValue = if (checked) trackW - thumbSize - pad else pad,
+        label = "wp_toggle_thumb"
+    )
+    Box(
+        modifier = Modifier
+            .size(width = trackW, height = trackH)
+            .clip(RoundedCornerShape(trackH / 2))
+            .background(if (checked) accentColor else Color.Transparent)
+            .border(
+                width = 2.dp,
+                color = if (checked) Color.Transparent else fg.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(trackH / 2)
+            )
+            .clickable { onToggle() },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .offset(x = thumbX)
+                .size(thumbSize)
+                .clip(CircleShape)
+                .background(if (checked) Color.White else fg.copy(alpha = 0.85f))
+        )
+    }
+}
+
+/** A Windows 10 Mobile settings row: leading glyph + title + current-value subtitle + Metro toggle. */
+@Composable
+fun SettingToggleRow(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    accentColor: Color,
+    isDark: Boolean,
+    onToggle: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onToggle() }
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = if (isDark) Color.White else Color.Black,
+            modifier = Modifier.size(26.dp)
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                fontSize = 16.sp,
+                color = if (isDark) Color.White else Color.Black
+            )
+            Text(
+                text = subtitle,
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+        }
+        WpToggle(checked = checked, onToggle = onToggle, accentColor = accentColor, isDark = isDark)
+    }
+}
+
+/** A bold accent-coloured W10M category header. */
+@Composable
+fun SettingsCategoryHeader(text: String, accentColor: Color) {
+    Text(
+        text = text,
+        fontSize = 20.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = accentColor,
+        modifier = Modifier.padding(top = 18.dp, bottom = 6.dp)
+    )
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -35,7 +141,7 @@ fun SettingsScreen(
 ) {
     val settings by viewModel.settings.collectAsState()
     val isDark = settings.isDarkTheme
-    val accentColor = Color(android.graphics.Color.parseColor(settings.accentColorHex))
+    val accentColor = parseAccent(settings.accentColorHex)
 
     // List of standard beautiful Windows Phone accents
     val accents = listOf(
@@ -61,9 +167,7 @@ fun SettingsScreen(
             .background(if (isDark) Color.Black else Color.White)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
+            modifier = Modifier.fillMaxSize()
         ) {
             // Header: Back arrow and "paramètres"
             Row(
@@ -93,26 +197,14 @@ fun SettingsScreen(
                 )
             }
 
-            // Tabs indicator placeholder
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                Text(
-                    text = "système",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = accentColor,
-                    modifier = Modifier.padding(end = 24.dp)
-                )
-                Text(
-                    text = "applications",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Light,
-                    color = Color.Gray
-                )
-            }
+            // Single honest section header (WP Settings is a flat scrolling list, not a pivot).
+            Text(
+                text = "système",
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = accentColor,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            )
 
             LazyColumn(
                 modifier = Modifier
@@ -123,130 +215,53 @@ fun SettingsScreen(
             ) {
                 // THEME TOGGLE
                 item {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(
-                            text = "Arrière-plan",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.toggleTheme() }
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (isDark) "Sombre" else "Clair",
-                                fontSize = 16.sp,
-                                color = if (isDark) Color.White else Color.Black
-                            )
-                            Switch(
-                                checked = isDark,
-                                onCheckedChange = { viewModel.toggleTheme() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
-                            )
-                        }
-                    }
+                    SettingToggleRow(
+                        icon = Icons.Default.Brightness4,
+                        title = "Arrière-plan",
+                        subtitle = if (isDark) "Sombre" else "Clair",
+                        checked = isDark,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.toggleTheme() }
                 }
 
                 // GRID COLUMN TOGGLE
                 item {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(
-                            text = "Taille de l'écran d'accueil",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.toggleColumns() }
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (settings.useThreeColumns) "3 Colonnes (WP 8.1)" else "2 Colonnes (WP 8)",
-                                fontSize = 16.sp,
-                                color = if (isDark) Color.White else Color.Black
-                            )
-                            Switch(
-                                checked = settings.useThreeColumns,
-                                onCheckedChange = { viewModel.toggleColumns() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
-                            )
-                        }
-                    }
+                    SettingToggleRow(
+                        icon = Icons.Default.GridView,
+                        title = "Taille de l'écran d'accueil",
+                        subtitle = if (settings.useThreeColumns) "3 Colonnes (WP 8.1)" else "2 Colonnes (WP 8)",
+                        checked = settings.useThreeColumns,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.toggleColumns() }
                 }
 
                 // STATUS BAR TOGGLE
                 item {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(
-                            text = "Barre d'état du launcher",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.toggleStatusBar() }
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (settings.showStatusBar) "Afficher l'heure & stats" else "Masquer la barre d'état",
-                                fontSize = 16.sp,
-                                color = if (isDark) Color.White else Color.Black
-                            )
-                            Switch(
-                                checked = settings.showStatusBar,
-                                onCheckedChange = { viewModel.toggleStatusBar() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
-                            )
-                        }
-                    }
+                    SettingToggleRow(
+                        icon = Icons.Default.SignalCellularAlt,
+                        title = "Barre d'état du launcher",
+                        subtitle = if (settings.showStatusBar) "Afficher l'heure & stats" else "Masquer la barre d'état",
+                        checked = settings.showStatusBar,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.toggleStatusBar() }
                 }
+
+                // PERSONNALISATION CATEGORY
+                item { SettingsCategoryHeader("personnalisation", accentColor) }
 
                 // WALLPAPER TOGGLE
                 item {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(
-                            text = "Mosaïque d'arrière-plan (Parallax)",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.toggleWallpaper() }
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (settings.useWallpaperBackground) "Activée - Tuiles transparentes" else "Désactivée - Tuiles pleines",
-                                fontSize = 16.sp,
-                                color = if (isDark) Color.White else Color.Black
-                            )
-                            Switch(
-                                checked = settings.useWallpaperBackground,
-                                onCheckedChange = { viewModel.toggleWallpaper() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
-                            )
-                        }
-                    }
+                    SettingToggleRow(
+                        icon = Icons.Default.Wallpaper,
+                        title = "Mosaïque d'arrière-plan (Parallax)",
+                        subtitle = if (settings.useWallpaperBackground) "Activée - Tuiles transparentes" else "Désactivée - Tuiles pleines",
+                        checked = settings.useWallpaperBackground,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.toggleWallpaper() }
                 }
 
                 // WALLPAPER PRESET SELECTION
@@ -300,66 +315,41 @@ fun SettingsScreen(
 
                 // SIGNATURE LOCK SCREEN TOGGLE
                 item {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(
-                            text = "Écran de verrouillage Windows Phone",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.toggleLockScreen() }
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (settings.isLockScreenEnabled) "Activé (Glisser vers le haut)" else "Désactivé (Démarrage direct)",
-                                fontSize = 16.sp,
-                                color = if (isDark) Color.White else Color.Black
-                            )
-                            Switch(
-                                checked = settings.isLockScreenEnabled,
-                                onCheckedChange = { viewModel.toggleLockScreen() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
-                            )
-                        }
-                    }
+                    SettingToggleRow(
+                        icon = Icons.Default.Lock,
+                        title = "Écran de verrouillage Windows Phone",
+                        subtitle = if (settings.isLockScreenEnabled) "Activé (Glisser vers le haut)" else "Désactivé (Démarrage direct)",
+                        checked = settings.isLockScreenEnabled,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.toggleLockScreen() }
                 }
+
+                // WP-STYLE APP ICONS TOGGLE
+                item {
+                    SettingToggleRow(
+                        icon = Icons.Default.AppShortcut,
+                        title = "Icônes d'applications Windows Phone",
+                        subtitle = if (settings.wpStyleAppIcons) "Glyphe blanc plat sur tuile (style Metro)" else "Icônes d'origine des applications",
+                        checked = settings.wpStyleAppIcons,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.toggleWpStyleAppIcons() }
+                }
+
+                // CORTANA CATEGORY
+                item { SettingsCategoryHeader("cortana", accentColor) }
 
                 // CORTANA SPEECH VOICE TOGGLE
                 item {
-                    Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                        Text(
-                            text = "Synthèse vocale de l'assistante (TTS)",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { viewModel.toggleCortanaVoice() }
-                                .padding(vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = if (settings.useCortanaVoice) "Voix active" else "Voix inactive",
-                                fontSize = 16.sp,
-                                color = if (isDark) Color.White else Color.Black
-                            )
-                            Switch(
-                                checked = settings.useCortanaVoice,
-                                onCheckedChange = { viewModel.toggleCortanaVoice() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
-                            )
-                        }
-                    }
+                    SettingToggleRow(
+                        icon = Icons.Default.RecordVoiceOver,
+                        title = "Synthèse vocale de l'assistante (TTS)",
+                        subtitle = if (settings.useCortanaVoice) "Voix active" else "Voix inactive",
+                        checked = settings.useCortanaVoice,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.toggleCortanaVoice() }
                 }
 
                 // ASSISTANT NICKNAME
@@ -391,6 +381,19 @@ fun SettingsScreen(
                     }
                 }
 
+                // PERFORMANCE CATEGORY
+                item { SettingsCategoryHeader("performance", accentColor) }
+                item {
+                    SettingToggleRow(
+                        icon = Icons.Default.Speed,
+                        title = "Mode performance",
+                        subtitle = if (settings.performanceMode) "Animations simplifiées (plus fluide)" else "Animations 3D complètes",
+                        checked = settings.performanceMode,
+                        accentColor = accentColor,
+                        isDark = isDark
+                    ) { viewModel.togglePerformanceMode() }
+                }
+
                 // ACCENT COLOR PICKER
                 item {
                     Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -413,7 +416,7 @@ fun SettingsScreen(
                                         val itemIndex = rowIndex * 3 + colIndex
                                         if (itemIndex < accents.size) {
                                             val currentAccent = accents[itemIndex]
-                                            val currentAccentColor = Color(android.graphics.Color.parseColor(currentAccent.hex))
+                                            val currentAccentColor = parseAccent(currentAccent.hex)
                                             val isSelected = settings.accentName == currentAccent.name
 
                                             Box(

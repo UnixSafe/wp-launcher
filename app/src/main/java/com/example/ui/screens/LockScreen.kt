@@ -47,25 +47,32 @@ fun LockScreen(
     var offsetY by remember { mutableStateOf(0f) }
     val coroutineScope = rememberCoroutineScope()
 
-    // Read date & time
-    val calendar = Calendar.getInstance()
-    val hourText = remember {
-        val h = calendar.get(Calendar.HOUR_OF_DAY).toString().padStart(2, '0')
-        val m = calendar.get(Calendar.MINUTE).toString().padStart(2, '0')
-        "$h:$m"
-    }
-    
-    val dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
-    val dayOfMonth = calendar.get(Calendar.DAY_OF_MONTH)
-    val month = calendar.get(Calendar.MONTH)
-
+    // Live date & time: a HOME launcher process is long-lived, so the clock must keep ticking
+    // instead of freezing at whatever time the lock screen first composed.
     val frenchDays = listOf("", "dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi")
     val frenchMonths = listOf("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
 
-    val dateFormatted = remember {
-        val d = frenchDays.getOrElse(dayOfWeek) { "" }
-        val m = frenchMonths.getOrElse(month) { "" }
-        "$d $dayOfMonth $m"
+    var now by remember { mutableStateOf(Calendar.getInstance()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            now = Calendar.getInstance()
+            kotlinx.coroutines.delay(10_000)
+        }
+    }
+    val hourText = remember(now) {
+        val h = now.get(Calendar.HOUR_OF_DAY).toString().padStart(2, '0')
+        val m = now.get(Calendar.MINUTE).toString().padStart(2, '0')
+        "$h:$m"
+    }
+    val dateFormatted = remember(now) {
+        val d = frenchDays.getOrElse(now.get(Calendar.DAY_OF_WEEK)) { "" }
+        val m = frenchMonths.getOrElse(now.get(Calendar.MONTH)) { "" }
+        "$d ${now.get(Calendar.DAY_OF_MONTH)} $m"
+    }
+
+    // Next agenda line sourced from the calendar tile, so it stays consistent with the Start tile.
+    val nextEvent = remember(tiles) {
+        tiles.find { it.packageName == "wp:calendar" }?.secondaryText ?: "Aucun événement"
     }
 
     // Unread count simulations from tiles
@@ -189,7 +196,7 @@ fun LockScreen(
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = "14:00 • Design Windows Phone 8.1",
+                        text = nextEvent,
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Light,
