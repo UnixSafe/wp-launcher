@@ -1,0 +1,33 @@
+when:
+  event: [push, tag, manual]
+  branch: [main, master]
+
+steps:
+  - name: build-apk
+    image: ghcr.io/cirruslabs/android-sdk:36
+    commands:
+      # The base image ships android-36; install the exact packages this app needs
+      # (compileSdk 36.1 / build-tools 36.1.0). Licenses are pre-accepted in the image,
+      # but re-accept defensively in case a new package is pulled.
+      - yes | sdkmanager --licenses > /dev/null 2>&1 || true
+      - sdkmanager "platform-tools" "platforms;android-36.1" "build-tools;36.1.0"
+      # No .env is committed; the secrets-gradle-plugin falls back to .env.example
+      # (placeholder key), so Cortana builds in offline-fallback mode (no Gemini key).
+      - chmod +x gradlew
+      - ./gradlew :app:assembleDebug --no-daemon --stacktrace
+      - ls -la app/build/outputs/apk/debug/
+
+  - name: github-release
+    image: woodpeckerci/plugin-github-release
+    when:
+      event: tag
+    settings:
+      api_key:
+        from_secret: github_token
+      files:
+        - "app/build/outputs/apk/debug/*.apk"
+      title: "WP Launcher ${CI_COMMIT_TAG}"
+      prerelease: true
+      note: |
+        APK debug construite automatiquement par Woodpecker CI.
+        Cortana fonctionne en mode hors-ligne (sans clé Gemini).
