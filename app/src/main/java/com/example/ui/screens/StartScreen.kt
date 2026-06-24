@@ -59,13 +59,25 @@ fun StartScreen(
     val liveFlipState by viewModel.liveFlipState.collectAsState()
     val installedApps by viewModel.installedApps.collectAsState()
 
-    val accentColor = parseAccent(settings.accentColorHex)
+    val accentColor = remember(settings.accentColorHex) { parseAccent(settings.accentColorHex) }
     val maxSpan = if (settings.useThreeColumns) 6 else 4
 
     // Dynamic tile packing to arrange SMALL (1x1), MEDIUM (2x2), WIDE (4x2 / 6x2)
     val packedRows = remember(tiles, maxSpan) {
         packTilesToRows(tiles, maxSpan)
     }
+
+    // Resolve each pinned app's (downscaled) icon by package once — O(1) lookup per tile instead of
+    // an O(N) scan inside every tile's composition.
+    val appsByPkg = remember(installedApps) { installedApps.associateBy { it.packageName } }
+    val useWallpaper = settings.useWallpaperBackground
+
+    // Stable callbacks hoisted once so each PhoneTile doesn't allocate 5 fresh closures per recomposition.
+    val onLaunch = remember(viewModel) { { t: TileEntity -> viewModel.launchTile(t) } }
+    val onUnpin = remember(viewModel) { { t: TileEntity -> viewModel.unpinTile(t) } }
+    val onResize = remember(viewModel) { { t: TileEntity -> viewModel.cycleTileSize(t) } }
+    val onMoveUp = remember(viewModel) { { t: TileEntity -> viewModel.moveTileUp(t) } }
+    val onMoveDown = remember(viewModel) { { t: TileEntity -> viewModel.moveTileDown(t) } }
 
     // Determine lock background brushes based on custom wallpaper selection
     val isDark = settings.isDarkTheme
@@ -89,10 +101,12 @@ fun StartScreen(
         }
     }
 
-    val backgroundModifier = if (settings.useWallpaperBackground && backgroundBrush != null) {
-        Modifier.background(backgroundBrush)
-    } else {
-        Modifier.background(if (isDark) Color.Black else Color.White)
+    val backgroundModifier = remember(settings.useWallpaperBackground, backgroundBrush, isDark) {
+        if (settings.useWallpaperBackground && backgroundBrush != null) {
+            Modifier.background(backgroundBrush)
+        } else {
+            Modifier.background(if (isDark) Color.Black else Color.White)
+        }
     }
 
     Box(
@@ -200,7 +214,10 @@ fun StartScreen(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(gap)
                 ) {
-                    items(packedRows.size) { rowIndex ->
+                    items(
+                        count = packedRows.size,
+                        contentType = { "tileRow" }
+                    ) { rowIndex ->
                         val rowItems = packedRows[rowIndex]
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -223,16 +240,16 @@ fun StartScreen(
                                 ) {
                                     PhoneTile(
                                         tile = tile,
-                                        settings = settings,
                                         accentColor = accentColor,
+                                        useWallpaperBackground = useWallpaper,
                                         isEditMode = isEditMode,
-                                        liveFlipState = liveFlipState,
-                                        installedApps = installedApps,
-                                        onLaunch = { viewModel.launchTile(tile) },
-                                        onUnpin = { viewModel.unpinTile(tile) },
-                                        onResize = { viewModel.cycleTileSize(tile) },
-                                        onMoveUp = { viewModel.moveTileUp(tile) },
-                                        onMoveDown = { viewModel.moveTileDown(tile) }
+                                        isFlipped = tile.packageName in FLIP_TILES && (liveFlipState % 2 == 1),
+                                        tileIcon = if (tile.packageName.startsWith("wp:")) null else appsByPkg[tile.packageName]?.icon,
+                                        onLaunch = onLaunch,
+                                        onUnpin = onUnpin,
+                                        onResize = onResize,
+                                        onMoveUp = onMoveUp,
+                                        onMoveDown = onMoveDown
                                     )
                                 }
                             }
@@ -263,35 +280,27 @@ fun StartScreen(
 @Composable
 fun PhoneTile(
     tile: TileEntity,
-    settings: SettingsEntity,
     accentColor: Color,
+    useWallpaperBackground: Boolean,
     isEditMode: Boolean,
-    liveFlipState: Int,
-    installedApps: List<AppItem>,
-    onLaunch: () -> Unit,
-    onUnpin: () -> Unit,
-    onResize: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit
+    isFlipped: Boolean,
+    tileIcon: Bitmap?,
+    onLaunch: (TileEntity) -> Unit,
+    onUnpin: (TileEntity) -> Unit,
+    onResize: (TileEntity) -> Unit,
+    onMoveUp: (TileEntity) -> Unit,
+    onMoveDown: (TileEntity) -> Unit
 ) {
     // This tile's own accent (custom override, else the global accent), crash-safe.
     val tileAccent = remember(tile.customAccentColor, accentColor) {
         tile.customAccentColor?.let { parseAccent(it) } ?: accentColor
     }
-    val backgroundColor = if (settings.useWallpaperBackground) {
+    val backgroundColor = if (useWallpaperBackground) {
         // WP "transparent tile" mode: wallpaper shows through, but a faint accent-tinted plane
         // keeps each tile's colour identity instead of flattening everything to grey.
         tileAccent.copy(alpha = 0.45f)
     } else {
         tileAccent
-    }
-
-    // Determine if we should show secondary animated content
-    val isFlipped = remember(tile.packageName, liveFlipState) {
-        when (tile.packageName) {
-            "wp:weather", "wp:photos", "wp:calendar", "wp:cortana" -> (liveFlipState % 2 == 1)
-            else -> false
-        }
     }
 
     // WP signature press: the tile TILTS in 3D toward the finger and depresses, then springs back.
@@ -325,18 +334,29 @@ fun PhoneTile(
         label = "tile_flip"
     )
 
+    // Only allocate the 3D transform layers while actually animating: a tile AT REST carries ZERO
+    // graphicsLayers (no offscreen render target), which is the big GPU/overdraw saving on a weak GPU.
+    val restScale = if (isEditMode) 0.96f else 1f
+    val isResting = released && tiltX == 0f && tiltY == 0f && pressScale == restScale
+    val tileLayerMod = if (isResting) Modifier else Modifier.graphicsLayer {
+        rotationX = tiltX
+        rotationY = tiltY
+        scaleX = pressScale
+        scaleY = pressScale
+        cameraDistance = 12f * density
+        transformOrigin = TransformOrigin.Center
+    }
+    val flipLayerMod = if (flipAngle == 0f) Modifier else Modifier.graphicsLayer {
+        rotationX = flipAngle
+        cameraDistance = 14f * density
+        transformOrigin = TransformOrigin(0.5f, 1f)
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
             .onSizeChanged { tileSize = it }
-            .graphicsLayer {
-                rotationX = tiltX
-                rotationY = tiltY
-                scaleX = pressScale
-                scaleY = pressScale
-                cameraDistance = 12f * density
-                transformOrigin = TransformOrigin.Center
-            }
+            .then(tileLayerMod)
             .padding(2.dp)
             .clip(RoundedCornerShape(0.dp)) // Flat geometric blocks!
             .background(backgroundColor)
@@ -357,8 +377,8 @@ fun PhoneTile(
                             pressOffset = null
                         }
                     },
-                    onTap = { if (!isEditMode) onLaunch() },
-                    onLongPress = { onResize() }
+                    onTap = { if (!isEditMode) onLaunch(tile) },
+                    onLongPress = { onResize(tile) }
                 )
             }
     ) {
@@ -366,14 +386,10 @@ fun PhoneTile(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    rotationX = flipAngle
-                    cameraDistance = 14f * density
-                    transformOrigin = TransformOrigin(0.5f, 1f)
-                }
+                .then(flipLayerMod)
         ) {
             if (flipAngle <= 90f) {
-                TileFrontState(tile, settings, installedApps)
+                TileFrontState(tile, useWallpaperBackground, tileIcon)
             } else {
                 // Counter-rotate the back face so its text is not mirrored.
                 Box(
@@ -385,7 +401,7 @@ fun PhoneTile(
                             transformOrigin = TransformOrigin(0.5f, 1f)
                         }
                 ) {
-                    TileBackState(tile, settings)
+                    TileBackState(tile)
                 }
             }
         }
@@ -399,7 +415,7 @@ fun PhoneTile(
             ) {
                 // Unpin button (top right)
                 IconButton(
-                    onClick = onUnpin,
+                    onClick = { onUnpin(tile) },
                     modifier = Modifier
                         .align(Alignment.TopEnd)
                         .padding(2.dp)
@@ -417,7 +433,7 @@ fun PhoneTile(
 
                 // Resize button (bottom right)
                 IconButton(
-                    onClick = onResize,
+                    onClick = { onResize(tile) },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
                         .padding(2.dp)
@@ -441,7 +457,7 @@ fun PhoneTile(
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         IconButton(
-                            onClick = onMoveUp,
+                            onClick = { onMoveUp(tile) },
                             modifier = Modifier
                                 .size(26.dp)
                                 .background(Color.Black.copy(alpha = 0.8f), CircleShape)
@@ -456,7 +472,7 @@ fun PhoneTile(
                         }
 
                         IconButton(
-                            onClick = onMoveDown,
+                            onClick = { onMoveDown(tile) },
                             modifier = Modifier
                                 .size(26.dp)
                                 .background(Color.Black.copy(alpha = 0.8f), CircleShape)
@@ -480,8 +496,8 @@ fun PhoneTile(
 @Composable
 fun TileFrontState(
     tile: TileEntity,
-    settings: SettingsEntity,
-    installedApps: List<AppItem>
+    useWallpaperBackground: Boolean,
+    tileIcon: Bitmap?
 ) {
     val isSmall = tile.size == "SMALL"
     val isWide = tile.size == "WIDE"
@@ -530,7 +546,7 @@ fun TileFrontState(
                             .fillMaxSize()
                             // Keep the photo-collage orange only in solid mode; in transparent
                             // wallpaper mode let the tile background (and wallpaper) show through.
-                            .then(if (!settings.useWallpaperBackground) Modifier.background(Color(0xFFE25B26)) else Modifier)
+                            .then(if (!useWallpaperBackground) Modifier.background(Color(0xFFE25B26)) else Modifier)
                     ) {
                         Column(
                             modifier = Modifier
@@ -619,19 +635,16 @@ fun TileFrontState(
                 }
             }
         } else {
-            // Android System application icon drawer
-            val targetApp = remember(tile.packageName, installedApps) {
-                installedApps.find { it.packageName == tile.packageName }
-            }
-
+            // Android System application icon drawer (icon resolved once at the call site)
+            val iconImage = remember(tileIcon) { tileIcon?.asImageBitmap() }
             Box(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(if (isSmall) 12.dp else 16.dp)
             ) {
-                if (targetApp?.icon != null) {
+                if (iconImage != null) {
                     Image(
-                        bitmap = targetApp.icon.asImageBitmap(),
+                        bitmap = iconImage,
                         contentDescription = tile.label,
                         modifier = Modifier
                             .size(if (isSmall) 32.dp else 40.dp)
@@ -686,8 +699,7 @@ fun TileFrontState(
 // Side B of Live Tile: Details flipping slide screen (Météo forecasts, Calendar appointments)
 @Composable
 fun TileBackState(
-    tile: TileEntity,
-    settings: SettingsEntity
+    tile: TileEntity
 ) {
     Box(
         modifier = Modifier
@@ -782,6 +794,10 @@ fun TileBackState(
         }
     }
 }
+
+// The only tiles whose front/back live-tile content flips on the 4s tick. Computing flip state at
+// the call site (a plain Boolean) means the other tiles never see the ticking value and are skipped.
+private val FLIP_TILES = setOf("wp:weather", "wp:photos", "wp:calendar", "wp:cortana")
 
 // Minute-resolution HH:mm helper for the live clock tile.
 fun currentHmTile(): String {

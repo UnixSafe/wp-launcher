@@ -251,9 +251,16 @@ fun AllAppsScreen(
                                 }
                             }
 
-                            // Section Apps List
-                            items(items.size) { appIndex ->
+                            // Section Apps List (keyed by component so scroll reuses nodes and
+                            // search filtering retains per-row state instead of rebinding by index)
+                            items(
+                                count = items.size,
+                                key = { i -> items[i].packageName + "/" + items[i].className },
+                                contentType = { "app" }
+                            ) { appIndex ->
                                 val app = items[appIndex]
+                                // Wrap the Bitmap once per icon, not on every recomposition/fling frame.
+                                val iconImage = remember(app.icon) { app.icon?.asImageBitmap() }
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -264,9 +271,9 @@ fun AllAppsScreen(
                                         .padding(vertical = 10.dp, horizontal = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    if (app.icon != null) {
+                                    if (iconImage != null) {
                                         Image(
-                                            bitmap = app.icon.asImageBitmap(),
+                                            bitmap = iconImage,
                                             contentDescription = app.label,
                                             modifier = Modifier
                                                 .size(44.dp)

@@ -71,7 +71,8 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
         val repository = LauncherRepository(applicationContext, database.launcherDao)
         val factory = ViewModelFactory(application, repository)
 
-        textToSpeech = android.speech.tts.TextToSpeech(this, this)
+        // TextToSpeech is initialised lazily on first speak (see ensureTts) — its service bind is
+        // pure overhead on the Start cold-start path and is only needed when Cortana speaks.
 
         enableEdgeToEdge()
         hideSystemStatusBar()
@@ -87,7 +88,7 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
             val isLocked by viewModel.isLocked.collectAsState()
             val isLaunchingApp by viewModel.isLaunchingApp.collectAsState()
 
-            val accentColor = parseAccent(settings.accentColorHex)
+            val accentColor = remember(settings.accentColorHex) { parseAccent(settings.accentColorHex) }
 
             // Default-launcher prompt: re-evaluate on every resume (so it disappears the moment
             // the launcher becomes default) and only show it after a 24h cooldown once dismissed.
@@ -115,6 +116,7 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
             ) {
                 LaunchedEffect(Unit) {
                     viewModel.speakEvent.collect { text ->
+                        ensureTts()
                         textToSpeech?.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, null)
                     }
                 }
@@ -376,6 +378,10 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
                 android.widget.Toast.LENGTH_LONG
             ).show()
         }
+    }
+
+    private fun ensureTts() {
+        if (textToSpeech == null) textToSpeech = android.speech.tts.TextToSpeech(this, this)
     }
 
     override fun onInit(status: Int) {

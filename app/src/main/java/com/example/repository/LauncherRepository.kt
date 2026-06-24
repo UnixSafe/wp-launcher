@@ -69,24 +69,23 @@ class LauncherRepository(
         }.sortedBy { it.label.lowercase() }
     }
 
+    // Cap rasterized icons to the max displayed size (~44dp). App launcher icons are often
+    // 144-512px full-res; keeping all of them at full resolution wastes a lot of RAM and GPU
+    // upload bandwidth on a weak device. We downscale every icon to iconPx once, off the main
+    // thread, so the list and tiles stay light and fluid.
+    private val iconPx: Int =
+        (44f * context.resources.displayMetrics.density).toInt().coerceAtLeast(48)
+
     private fun drawableToBitmap(drawable: Drawable): Bitmap? {
-        try {
-            if (drawable is BitmapDrawable) {
-                if (drawable.bitmap != null) {
-                    return drawable.bitmap
-                }
-            }
-            // Handle Adaptive or XML drawables
-            val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 96
-            val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 96
-            val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        return try {
+            val bitmap = Bitmap.createBitmap(iconPx, iconPx, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bitmap)
-            drawable.setBounds(0, 0, canvas.width, canvas.height)
+            drawable.setBounds(0, 0, iconPx, iconPx)
             drawable.draw(canvas)
-            return bitmap
+            bitmap
         } catch (e: Exception) {
             e.printStackTrace()
-            return null
+            null
         }
     }
 }
