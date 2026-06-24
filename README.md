@@ -13,8 +13,17 @@
 [![UI](https://img.shields.io/badge/UI-Fran%C3%A7ais-0078D7.svg)](#-a-note-on-language)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-v1.0--beta-blueviolet.svg)](#-status)
+[![Download APK](https://img.shields.io/github/v/release/UnixSafe/wp-launcher?include_prereleases&label=Download%20APK&logo=android&color=3DDC84)](https://github.com/UnixSafe/wp-launcher/releases/latest)
 
 </div>
+
+---
+
+## 📥 Download
+
+**[⬇️ Download the latest APK](https://github.com/UnixSafe/wp-launcher/releases/latest)** and install it on any Android 6.0+ device.
+
+It's a debug build, so **Cortana runs fully offline** (no Gemini key needed). Enable *install from unknown sources*, open the `.apk`, and you're back on Windows Phone. 📱
 
 ---
 
