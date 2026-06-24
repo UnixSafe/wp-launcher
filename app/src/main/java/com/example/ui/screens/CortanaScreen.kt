@@ -6,6 +6,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
@@ -61,12 +62,10 @@ fun CortanaScreen(
         label = "CircleBreathScale"
     )
 
-    // Scroll to bottom when message list updates
-    LaunchedEffect(chatMessages.size) {
+    // Scroll to bottom when the message list grows OR the thinking state flips.
+    LaunchedEffect(chatMessages.size, isThinking) {
         if (chatMessages.isNotEmpty()) {
-            coroutineScope.launch {
-                lazyListState.animateScrollToItem(chatMessages.size - 1)
-            }
+            lazyListState.animateScrollToItem(chatMessages.size - 1)
         }
     }
 
@@ -84,9 +83,7 @@ fun CortanaScreen(
             .background(if (isDark) Color.Black else Color.White)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
+            modifier = Modifier.fillMaxSize()
         ) {
             // Header Row: Back, Title, Clear chats
             Row(
@@ -181,14 +178,17 @@ fun CortanaScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Suggestions horizontal list (Badges)
-            Row(
+            // Suggestions: a single horizontally-scrollable strip (was a fixed Row that
+            // overflowed — the 4 chips were wider than the screen, squashing the last chip
+            // into a tall column that pushed the chat + input bar off-screen).
+            LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                    .padding(vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                suggestions.forEach { sug ->
+                items(suggestions) { sug ->
                     Box(
                         modifier = Modifier
                             .background(
@@ -205,7 +205,8 @@ fun CortanaScreen(
                             text = sug,
                             color = if (isDark) Color.White else Color.Black,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
                         )
                     }
                 }

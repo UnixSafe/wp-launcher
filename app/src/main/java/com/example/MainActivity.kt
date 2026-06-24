@@ -101,10 +101,12 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
                 onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
             }
             var showDefaultLauncherDialog by remember { mutableStateOf(false) }
-            LaunchedEffect(isDefault, settings.defaultPromptDismissedAt) {
+            LaunchedEffect(isDefault, settings.defaultPromptDismissedAt, isLocked, settings.isLockScreenEnabled) {
                 val cooldownPassed =
                     System.currentTimeMillis() - settings.defaultPromptDismissedAt > 24L * 60 * 60 * 1000
-                showDefaultLauncherDialog = !isDefault && cooldownPassed
+                // Don't pop the dialog over the lock screen (its window would steal the unlock swipe).
+                val unlocked = !(settings.isLockScreenEnabled && isLocked)
+                showDefaultLauncherDialog = !isDefault && cooldownPassed && unlocked
             }
 
             MyApplicationTheme(
@@ -139,7 +141,7 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
                             onOpenActionCenter = { viewModel.setNotificationCenterOpen(true) }
                         )
 
-                        Box(modifier = Modifier.fillMaxSize().weight(1f)) {
+                        Box(modifier = Modifier.fillMaxSize().weight(1f).navigationBarsPadding()) {
                             AnimatedContent(
                                 targetState = activeScreen,
                                 transitionSpec = {
@@ -280,7 +282,7 @@ class MainActivity : ComponentActivity(), android.speech.tts.TextToSpeech.OnInit
         val controller = WindowInsetsControllerCompat(window, window.decorView)
         // Sticky immersive: a top-edge swipe shows the bar transiently then it auto-hides, so it
         // does not compete with the WP status strip's pull-down-to-open-Action-Center gesture.
-        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+        controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         controller.hide(WindowInsetsCompat.Type.statusBars())
     }
 

@@ -70,6 +70,11 @@ fun LockScreen(
         "$d ${now.get(Calendar.DAY_OF_MONTH)} $m"
     }
 
+    // Next agenda line sourced from the calendar tile, so it stays consistent with the Start tile.
+    val nextEvent = remember(tiles) {
+        tiles.find { it.packageName == "wp:calendar" }?.secondaryText ?: "Aucun événement"
+    }
+
     // Unread count simulations from tiles
     val smsCount = remember(tiles) { tiles.find { it.packageName == "wp:sms" }?.unreadCount ?: 0 }
     val callCount = remember(tiles) { tiles.find { it.packageName == "wp:phone" }?.unreadCount ?: 0 }
@@ -191,7 +196,7 @@ fun LockScreen(
                         letterSpacing = 1.sp
                     )
                     Text(
-                        text = "14:00 • Design Windows Phone 8.1",
+                        text = nextEvent,
                         color = Color.White,
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Light,

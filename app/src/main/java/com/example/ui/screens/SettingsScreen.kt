@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -27,6 +28,48 @@ import com.example.viewmodel.ActiveScreen
 import com.example.viewmodel.LauncherViewModel
 
 data class ColorAccentItem(val name: String, val hex: String)
+
+/** Authentic Windows Phone / Windows 10 Mobile Metro toggle: a flat pill track that fills with
+ *  the accent when on (white thumb on the right), or a thin bordered transparent track when off
+ *  (foreground thumb on the left). Replaces the Material3 Switch which looks like an Android toggle. */
+@Composable
+fun WpToggle(
+    checked: Boolean,
+    onToggle: () -> Unit,
+    accentColor: Color,
+    isDark: Boolean
+) {
+    val trackW = 46.dp
+    val trackH = 20.dp
+    val thumbSize = 12.dp
+    val pad = 4.dp
+    val fg = if (isDark) Color.White else Color.Black
+    val thumbX by animateDpAsState(
+        targetValue = if (checked) trackW - thumbSize - pad else pad,
+        label = "wp_toggle_thumb"
+    )
+    Box(
+        modifier = Modifier
+            .size(width = trackW, height = trackH)
+            .clip(RoundedCornerShape(trackH / 2))
+            .background(if (checked) accentColor else Color.Transparent)
+            .border(
+                width = 2.dp,
+                color = if (checked) Color.Transparent else fg.copy(alpha = 0.55f),
+                shape = RoundedCornerShape(trackH / 2)
+            )
+            .clickable { onToggle() },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .offset(x = thumbX)
+                .size(thumbSize)
+                .clip(CircleShape)
+                .background(if (checked) Color.White else fg.copy(alpha = 0.85f))
+        )
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,9 +105,7 @@ fun SettingsScreen(
             .background(if (isDark) Color.Black else Color.White)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
+            modifier = Modifier.fillMaxSize()
         ) {
             // Header: Back arrow and "paramètres"
             Row(
@@ -133,10 +174,11 @@ fun SettingsScreen(
                                 fontSize = 16.sp,
                                 color = if (isDark) Color.White else Color.Black
                             )
-                            Switch(
+                            WpToggle(
                                 checked = isDark,
-                                onCheckedChange = { viewModel.toggleTheme() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
+                                onToggle = { viewModel.toggleTheme() },
+                                accentColor = accentColor,
+                                isDark = isDark
                             )
                         }
                     }
@@ -165,10 +207,11 @@ fun SettingsScreen(
                                 fontSize = 16.sp,
                                 color = if (isDark) Color.White else Color.Black
                             )
-                            Switch(
+                            WpToggle(
                                 checked = settings.useThreeColumns,
-                                onCheckedChange = { viewModel.toggleColumns() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
+                                onToggle = { viewModel.toggleColumns() },
+                                accentColor = accentColor,
+                                isDark = isDark
                             )
                         }
                     }
@@ -197,10 +240,11 @@ fun SettingsScreen(
                                 fontSize = 16.sp,
                                 color = if (isDark) Color.White else Color.Black
                             )
-                            Switch(
+                            WpToggle(
                                 checked = settings.showStatusBar,
-                                onCheckedChange = { viewModel.toggleStatusBar() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
+                                onToggle = { viewModel.toggleStatusBar() },
+                                accentColor = accentColor,
+                                isDark = isDark
                             )
                         }
                     }
@@ -229,10 +273,11 @@ fun SettingsScreen(
                                 fontSize = 16.sp,
                                 color = if (isDark) Color.White else Color.Black
                             )
-                            Switch(
+                            WpToggle(
                                 checked = settings.useWallpaperBackground,
-                                onCheckedChange = { viewModel.toggleWallpaper() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
+                                onToggle = { viewModel.toggleWallpaper() },
+                                accentColor = accentColor,
+                                isDark = isDark
                             )
                         }
                     }
@@ -310,10 +355,11 @@ fun SettingsScreen(
                                 fontSize = 16.sp,
                                 color = if (isDark) Color.White else Color.Black
                             )
-                            Switch(
+                            WpToggle(
                                 checked = settings.isLockScreenEnabled,
-                                onCheckedChange = { viewModel.toggleLockScreen() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
+                                onToggle = { viewModel.toggleLockScreen() },
+                                accentColor = accentColor,
+                                isDark = isDark
                             )
                         }
                     }
@@ -342,10 +388,11 @@ fun SettingsScreen(
                                 fontSize = 16.sp,
                                 color = if (isDark) Color.White else Color.Black
                             )
-                            Switch(
+                            WpToggle(
                                 checked = settings.useCortanaVoice,
-                                onCheckedChange = { viewModel.toggleCortanaVoice() },
-                                colors = SwitchDefaults.colors(checkedThumbColor = accentColor)
+                                onToggle = { viewModel.toggleCortanaVoice() },
+                                accentColor = accentColor,
+                                isDark = isDark
                             )
                         }
                     }

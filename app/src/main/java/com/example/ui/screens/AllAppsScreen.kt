@@ -107,23 +107,9 @@ fun AllAppsScreen(
         modifier = modifier
             .fillMaxSize()
             .background(if (isDark) Color.Black else Color.White)
-            .pointerInput(Unit) {
-                // WP: swipe RIGHT to slide back to the Start screen.
-                var dx = 0f
-                detectHorizontalDragGestures(
-                    onDragStart = { dx = 0f },
-                    onDragEnd = {
-                        if (dx > 60f) viewModel.setScreen(ActiveScreen.START)
-                        dx = 0f
-                    },
-                    onDragCancel = { dx = 0f }
-                ) { _, amount -> dx += amount }
-            }
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
+            modifier = Modifier.fillMaxSize()
         ) {
             // Header Row: Back arrow and "applications"
             Row(
@@ -225,6 +211,19 @@ fun AllAppsScreen(
                         .weight(1f)
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
+                        .pointerInput(Unit) {
+                            // WP: swipe RIGHT to slide back to Start. Lives on the list (below the
+                            // search field in hit-test order) so it never steals the TextField.
+                            var dx = 0f
+                            detectHorizontalDragGestures(
+                                onDragStart = { dx = 0f },
+                                onDragEnd = {
+                                    if (dx > 60f) viewModel.setScreen(ActiveScreen.START)
+                                    dx = 0f
+                                },
+                                onDragCancel = { dx = 0f }
+                            ) { _, amount -> dx += amount }
+                        }
                 ) {
                     val sortedAlphabet = ('A'..'Z').toList() + '#'
                     
@@ -303,7 +302,7 @@ fun AllAppsScreen(
                     }
 
                     item {
-                        Spacer(modifier = Modifier.height(60.dp))
+                        Spacer(modifier = Modifier.height(24.dp))
                     }
                 }
             }
